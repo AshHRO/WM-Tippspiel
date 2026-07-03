@@ -777,74 +777,93 @@ function buildStandings(){
   const users=visibleUsers();
   const grp=S.currentGroupId?(S.d.groups||[]).find(g=>g.id===S.currentGroupId):null;
   const de=S.lang==='DE';
-  const finished=S.d.matches.filter(m=>m.actualHome!=null&&m.actualAway!=null&&m.stage!=='Group Stage');
 
-  // For common games: only consider users who have tipped at least once (ignore untipped users)
-  const activeUsers=users.filter(u=>finished.some(m=>S.d.predictions[pk(m.id,u.id)]!=null));
-  const common=activeUsers.length>0
-    ?finished.filter(m=>activeUsers.every(u=>S.d.predictions[pk(m.id,u.id)]!=null))
-    :[];
+  const finished=S.d.matches.filter(m=>m.actualHome!=null&&m.actualAway!=null&&m.stage!=='Group Stage');
+  // Common = games where ALL visible users tipped (strict — no "excl. untipped" shortcut)
+  const common=finished.filter(m=>users.every(u=>S.d.predictions[pk(m.id,u.id)]!=null));
 
   const stats=users.map(u=>{
-    let cp=0,ce=0,op=0,oe=0,opicks=0;
-    common.forEach(m=>{const p=S.d.predictions[pk(m.id,u.id)];const v=pts(p,m);if(v!=null){cp+=v;if(v>=(S.d.settings.exact??4)&&v>0)ce++;}});
-    finished.forEach(m=>{const p=S.d.predictions[pk(m.id,u.id)];if(p)opicks++;const v=pts(p,m);if(v!=null){op+=v;if(v>=(S.d.settings.exact??4)&&v>0)oe++;}});
-    return{id:u.id,name:u.name,cp,ce,op,oe,opicks};
+    let cp=0,ce=0,op=0,oe=0,opicks=0,cpicks=0;
+    common.forEach(m=>{
+      const p=S.d.predictions[pk(m.id,u.id)];
+      if(p)cpicks++;
+      const v=pts(p,m);
+      if(v!=null){cp+=v;if(v>=(S.d.settings.exact??4)&&v>0)ce++;}
+    });
+    finished.forEach(m=>{
+      const p=S.d.predictions[pk(m.id,u.id)];
+      if(p)opicks++;
+      const v=pts(p,m);
+      if(v!=null){op+=v;if(v>=(S.d.settings.exact??4)&&v>0)oe++;}
+    });
+    return{id:u.id,name:u.name,cp,ce,op,oe,opicks,cpicks};
   });
 
-  const byCommon=[...stats].sort((a,b)=>b.cp-a.cp||b.ce-a.ce||b.op-a.op);
-  const byOverall=[...stats].sort((a,b)=>b.op-a.op||b.oe-a.oe||b.opicks-a.opicks);
-
-  // Always show both tables for everyone when there are finished games
-  const showBoth=finished.length>0;
-
+  // Ranked by common pts first, overall pts as tiebreak
+  const ranked=[...stats].sort((a,b)=>b.cp-a.cp||b.op-a.op||b.oe-a.oe||b.opicks-a.opicks);
   const RNK=['\uD83E\uDD47','\uD83E\uDD48','\uD83E\uDD49'];
-  function makeTable(ranked,col){
-    if(!ranked.length)return '<div class="empty">'+(de?'Noch keine Spieler.':'No players yet.')+'</div>';
-    const rows=ranked.map((r,i)=>{
+
+  const hasCommon=common.length>0;
+  const hasFinished=finished.length>0;
+
+  const comLabel=de?'Gleich':'Common';
+  const totLabel=de?'Gesamt':'Overall';
+  const exLabel=de?'Exakt':'Exact';
+  const pkLabel=de?'Tipps':'Picks';
+  const pktLabel=de?'Pkt':'Pts';
+
+  let rows='';
+  if(!ranked.length){
+    rows='<tr><td colspan="7" class="empty">'+(de?'Noch keine Spieler.':'No players yet.')+'</td></tr>';
+  } else {
+    rows=ranked.map((r,i)=>{
       const isMe=r.id===S.me?.id;
-      const p=col==='c'?r.cp:r.op;
-      const e=col==='c'?r.ce:r.oe;
-      const pk2=col==='c'?common.length:r.opicks;
-      const top=i===0&&p>0;
+      const top=i===0&&r.cp>0;
       const rk=i<3?RNK[i]:(i+1)+'';
+      const cpDiffers=r.cp!==r.op;
       return '<tr class="'+(isMe?'me-row':'')+'">'
         +'<td class="rank '+(top?'r1':'')+'" style="font-size:'+(i<3?'15px':'12px')+'">'+rk+'</td>'
         +'<td style="font-weight:'+(top?'700':'400')+'">'+esc(r.name)+'</td>'
-        +'<td class="mn">'+e+'</td>'
-        +'<td class="mn" style="color:var(--muted)">'+pk2+'</td>'
-        +'<td class="pts" style="'+(top?'font-size:15px;':'')+'">'+p+'</td>'
+        +'<td class="mn">'+r.ce+'</td>'
+        +'<td class="mn">'+r.cpicks+'</td>'
+        +'<td class="pts" style="'+(top?'font-size:15px;':'')+'">'+r.cp+'</td>'
+        // divider
+        +'<td style="color:var(--line);padding:0 4px;font-size:10px;">|</td>'
+        // overall col — grey if same as common, gold if different
+        +'<td class="pts" style="color:'+(cpDiffers?'var(--gold)':'var(--muted)')+'">'+r.op+'</td>'
         +'</tr>';
     }).join('');
-    return '<table class="st" style="width:100%;">'
-      +'<thead><tr>'
-      +'<th style="width:26px;"></th>'
-      +'<th>'+(de?'Spieler':'Player')+'</th>'
-      +'<th style="text-align:right">'+(de?'Exakt':'Exact')+'</th>'
-      +'<th style="text-align:right">'+(de?'Tipps':'Picks')+'</th>'
-      +'<th style="text-align:right">'+(de?'Pkt':'Pts')+'</th>'
-      +'</tr></thead>'
-      +'<tbody>'+rows+'</tbody></table>';
   }
 
-  const cNote=activeUsers.length<users.length
-    ?'<span style="color:var(--muted);font-size:9px;"> ('+(de?'ohne Untippte':'excl. untipped')+')</span>'
+  const commonInfo=de
+    ?'Gleiche: '+common.length+'/'+finished.length+' Spiele, in denen alle getippt haben'
+    :'Common: '+common.length+'/'+finished.length+' games tipped by everyone';
+  const note=common.length===0&&finished.length>0
+    ?(de?'Noch keine Spiele, bei denen alle getippt haben.':'No games tipped by everyone yet.')
     :'';
-  const cHdr='<div style="font-size:9px;font-family:monospace;text-transform:uppercase;letter-spacing:.07em;color:var(--gold);margin-bottom:7px;display:flex;align-items:center;gap:4px;">'
-    +(de?'Gleiche Spiele':'Common games')+' \u2022 '+common.length+'/'+finished.length
-    +cNote+'</div>';
-  const oHdr='<div style="font-size:9px;font-family:monospace;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);margin-bottom:7px;">'
-    +(de?'Gesamt':'Overall')+' \u2022 '+finished.length+' '+(de?'gespielt':'played')+'</div>';
 
-  const body=showBoth
-    ?'<div style="display:flex;gap:18px;flex-wrap:wrap;">'
-      +'<div style="flex:1;min-width:160px;">'+cHdr+makeTable(byCommon,'c')+'</div>'
-      +'<div style="flex:1;min-width:160px;">'+oHdr+makeTable(byOverall,'o')+'</div>'
-      +'</div>'
-    :'<div>'+oHdr+makeTable(byOverall,'o')+'</div>';
+  const table='<table class="st" style="width:100%;">'
+    +'<thead><tr>'
+    +'<th style="width:26px;"></th>'
+    +'<th>'+(de?'Spieler':'Player')+'</th>'
+    +'<th style="text-align:right">'+exLabel+'</th>'
+    +'<th style="text-align:right">'+pkLabel+'</th>'
+    +'<th style="text-align:right;color:var(--gold)">'+comLabel+' '+pktLabel+'</th>'
+    +'<th style="padding:0"></th>'
+    +'<th style="text-align:right;color:var(--muted)">'+totLabel+' '+pktLabel+'</th>'
+    +'</tr></thead>'
+    +'<tbody>'+rows+'</tbody>'
+    +'</table>';
 
   const title=de?'Tabelle':'Standings';
-  return '<section class="panel"><div class="ph"><h2>'+title+(grp?' &mdash; '+esc(grp.name):'')+' </h2></div>'+body+'</section>';
+  return '<section class="panel">'
+    +'<div class="ph">'
+    +'<h2>'+title+(grp?' &mdash; '+esc(grp.name):'')+' </h2>'
+    +'<span style="font-family:monospace;font-size:10px;color:var(--muted);">'+commonInfo+'</span>'
+    +'</div>'
+    +(note?'<p style="font-size:11px;color:var(--muted);font-family:monospace;margin:0 0 8px;">'+note+'</p>':'')
+    +table
+    +'</section>';
 }
 
 
