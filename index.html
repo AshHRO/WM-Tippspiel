@@ -733,9 +733,11 @@ function buildAdminPanel(){
     <div class="adm-sec">
       <h3 style="color:var(--red);">${t('dangerSec')}</h3>
       <div style="display:flex;gap:7px;flex-wrap:wrap;">
-        <button class="red sm" id="btn-clrp">Clear predictions</button>
+        <button class="red sm" id="btn-clr-finished">Clear finished tips</button>
+        <button class="red sm" id="btn-clrp">Clear ALL tips</button>
         <button class="red sm" id="btn-nuke">Delete everything</button>
       </div>
+      <p class="note" style="margin-top:6px;">"Clear finished tips" removes predictions for matches that are over. Useful after the round of 32 to let people retip later rounds.</p>
     </div>
   </div></div>`;
 }
@@ -744,21 +746,58 @@ function buildAdminPanel(){
 function buildStandings(){
   const users=visibleUsers();
   const grp=S.currentGroupId?(S.d.groups||[]).find(g=>g.id===S.currentGroupId):null;
-  const rows=users.map(u=>{
-    let total=0,exact=0,picks=0;
-    S.d.matches.forEach(m=>{const p=S.d.predictions[pk(m.id,u.id)];if(p)picks++;const v=pts(p,m);if(v!=null){total+=v;if(v>=(S.d.settings.exact??4)&&v>0)exact++;}});
-    return{id:u.id,name:u.name,total,exact,picks};
-  }).sort((a,b)=>b.total-a.total||b.exact-a.exact||b.picks-a.picks);
-  const tbody=rows.length===0?'<tr><td colspan="5" class="empty">No players yet.</td></tr>'
-    :rows.map((r,i)=>`<tr class="${r.id===S.me?.id?'me-row':''}"><td class="rank ${i===0&&r.total>0?'r1':''}">${i+1}</td><td>${esc(r.name)}</td><td class="mn">${r.exact}</td><td class="mn">${r.picks}</td><td class="pts">${r.total}</td></tr>`).join('');
-  return`<section class="panel">
-    <div class="ph"><h2>Standings${grp?' &mdash; '+esc(grp.name):''}</h2></div>
-    <table class="st"><thead><tr><th></th><th>${t('player')}</th><th style="text-align:right">${t('exact')}</th><th style="text-align:right">${t('picks')}</th><th style="text-align:right">${t('pts')}</th></tr></thead>
-    <tbody>${tbody}</tbody></table>
-  </section>`;
+  const de=S.lang==='DE';
+  const finished=S.d.matches.filter(m=>m.actualHome!=null&&m.actualAway!=null&&m.stage!=='Group Stage');
+  const common=finished.filter(m=>users.every(u=>S.d.predictions[pk(m.id,u.id)]!=null));
+  const stats=users.map(u=>{
+    let cp=0,ce=0,op=0,oe=0,opicks=0;
+    common.forEach(m=>{const p=S.d.predictions[pk(m.id,u.id)];const v=pts(p,m);if(v!=null){cp+=v;if(v>=(S.d.settings.exact??4)&&v>0)ce++;}});
+    finished.forEach(m=>{const p=S.d.predictions[pk(m.id,u.id)];if(p)opicks++;const v=pts(p,m);if(v!=null){op+=v;if(v>=(S.d.settings.exact??4)&&v>0)oe++;}});
+    return{id:u.id,name:u.name,cp,ce,op,oe,opicks};
+  });
+  const byCommon=[...stats].sort((a,b)=>b.cp-a.cp||b.ce-a.ce||b.op-a.op);
+  const byOverall=[...stats].sort((a,b)=>b.op-a.op||b.oe-a.oe||b.opicks-a.opicks);
+  const showBoth=users.length>1;
+  const RNK=['\uD83E\uDD47','\uD83E\uDD48','\uD83E\uDD49'];
+  function makeTable(ranked,col){
+    if(!ranked.length)return '<div class="empty">'+(de?'Noch keine Spieler.':'No players yet.')+'</div>';
+    const rows=ranked.map((r,i)=>{
+      const isMe=r.id===S.me?.id;
+      const p=col==='c'?r.cp:r.op;
+      const e=col==='c'?r.ce:r.oe;
+      const top=i===0&&p>0;
+      const rk=i<3?RNK[i]:(i+1)+'';
+      return '<tr class="'+(isMe?'me-row':'')+'">'
+        +'<td class="rank '+(top?'r1':'')+'" style="font-size:'+(i<3?'15px':'12px')+'">'+rk+'</td>'
+        +'<td style="font-weight:'+(top?'700':'400')+'">'+esc(r.name)+'</td>'
+        +'<td class="mn">'+e+'</td>'
+        +'<td class="pts" style="'+(top?'font-size:15px;':'')+'">'+p+'</td>'
+        +'</tr>';
+    }).join('');
+    return '<table class="st" style="width:100%;">'
+      +'<thead><tr>'
+      +'<th style="width:26px;"></th>'
+      +'<th>'+(de?'Spieler':'Player')+'</th>'
+      +'<th style="text-align:right">'+(de?'Exakt':'Exact')+'</th>'
+      +'<th style="text-align:right">'+(de?'Pkt':'Pts')+'</th>'
+      +'</tr></thead>'
+      +'<tbody>'+rows+'</tbody></table>';
+  }
+  const cHdr='<div style="font-size:9px;font-family:monospace;text-transform:uppercase;letter-spacing:.07em;color:var(--gold);margin-bottom:7px;">'
+    +(de?'Gleiche Spiele':'Common games')+' \u2022 '+common.length+'/'+finished.length+'</div>';
+  const oHdr='<div style="font-size:9px;font-family:monospace;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);margin-bottom:7px;">'
+    +(de?'Gesamt':'Overall')+' \u2022 '+finished.length+' '+(de?'gespielt':'played')+'</div>';
+  const body=showBoth
+    ?'<div style="display:flex;gap:16px;flex-wrap:wrap;">'
+      +'<div style="flex:1;min-width:130px;">'+cHdr+makeTable(byCommon,'c')+'</div>'
+      +'<div style="flex:1;min-width:130px;">'+oHdr+makeTable(byOverall,'o')+'</div>'
+      +'</div>'
+    :oHdr+makeTable(byOverall,'o');
+  const title=de?'Tabelle':'Standings';
+  return '<section class="panel"><div class="ph"><h2>'+title+(grp?' &mdash; '+esc(grp.name):'')+' </h2></div>'+body+'</section>';
 }
 
-/* ── Matches (Tipps) ── */
+
 function buildMatches(sorted){
   // Group Stage hidden — only knockout rounds matter
   const koOnly=sorted.filter(m=>m.stage!=='Group Stage');
@@ -1101,6 +1140,13 @@ function wireEvents(){
     });
   });
   /* Danger */
+  q('btn-clr-finished')?.addEventListener('click',async()=>{
+    const done=S.d.matches.filter(m=>m.actualHome!=null&&m.actualAway!=null).map(m=>m.id);
+    if(!done.length){alert('No finished matches yet.');return;}
+    if(!confirm('Delete all predictions for the '+done.length+' finished matches?'))return;
+    Object.keys(S.d.predictions).forEach(k=>{if(done.some(id=>k.startsWith(id+'__')))delete S.d.predictions[k];});
+    try{await dbSave();}catch(e){}render();
+  });
   q('btn-clrp')?.addEventListener('click',async()=>{
     if(!confirm('Clear ALL predictions?'))return;S.d.predictions={};try{await dbSave();}catch(e){}render();
   });
