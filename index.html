@@ -328,6 +328,32 @@ async function dbLoad(){
         _stubsAdded++;
       }
     });}
+    // Deduplicate: same kickoff → keep match with most data, merge others into it
+    {const _koMap={};S.d.matches.forEach(m=>{if(!m.kickoffISO)return;const k=m.kickoffISO.slice(0,16);(_koMap[k]||(_koMap[k]=[])).push(m);});
+    const _keep=new Set();const _remap={};
+    Object.values(_koMap).forEach(grp=>{
+      if(grp.length<2){grp.forEach(m=>_keep.add(m.id));return;}
+      const scored=grp.map(m=>({m,s:(m.matchNum?10:0)+(m.actualHome!=null?5:0)+(m.home&&m.home!=='TBD'?3:0)+(m.away&&m.away!=='TBD'?3:0)+(m.penWinner?2:0)})).sort((a,b)=>b.s-a.s);
+      const win=scored[0].m;_keep.add(win.id);
+      scored.slice(1).forEach(({m:oth})=>{
+        if(!win.matchNum&&oth.matchNum)win.matchNum=oth.matchNum;
+        if(win.home==='TBD'&&oth.home&&oth.home!=='TBD')win.home=oth.home;
+        if(win.away==='TBD'&&oth.away&&oth.away!=='TBD')win.away=oth.away;
+        if(win.actualHome==null&&oth.actualHome!=null){win.actualHome=oth.actualHome;win.actualAway=oth.actualAway;}
+        if(!win.penWinner&&oth.penWinner){win.penWinner=oth.penWinner;win.penHome=oth.penHome;win.penAway=oth.penAway;}
+        if(!win.stage&&oth.stage)win.stage=oth.stage;
+        _remap[oth.id]=win.id;
+      });
+    });
+    if(Object.keys(_remap).length>0){
+      S.d.matches=S.d.matches.filter(m=>_keep.has(m.id));
+      Object.keys(_remap).forEach(oldId=>{
+        Object.keys(S.d.predictions).forEach(k=>{
+          if(k.startsWith(oldId+'__')){const nk=_remap[oldId]+'__'+k.slice(oldId.length+2);if(!S.d.predictions[nk])S.d.predictions[nk]=S.d.predictions[k];delete S.d.predictions[k];}
+        });
+      });
+      _stubsAdded+=Object.keys(_remap).length;
+    }}
     S.localVersion=data.version??0;
   }
   S.lastLoaded=new Date();
@@ -491,6 +517,9 @@ function mergeFixtures(incoming){
     const ex=byKey[k]||(im.kickoffISO?byKO[im.kickoffISO.slice(0,16)]:null);
     if(ex){
       if(im.matchNum!=null&&!ex.matchNum){ex.matchNum=im.matchNum;updated++;}
+      // Update TBD team names when real names come from sync
+      if(im.home&&im.home!=='TBD'&&(!ex.home||ex.home==='TBD')){ex.home=im.home;updated++;}
+      if(im.away&&im.away!=='TBD'&&(!ex.away||ex.away==='TBD')){ex.away=im.away;updated++;}
       if(im.penWinner&&!ex.penWinner){ex.penWinner=im.penWinner;ex.penHome=ti(im.penHome);ex.penAway=ti(im.penAway);updated++;}
       if(im.actualHome!=null&&im.actualAway!=null){const nh=ti(im.actualHome),na=ti(im.actualAway);if(ex.actualHome!==nh||ex.actualAway!==na){ex.actualHome=nh;ex.actualAway=na;updated++;}}
     }else{
@@ -733,6 +762,7 @@ function buildAdminPanel(){
     <div class="adm-sec">
       <h3 style="color:var(--red);">${t('dangerSec')}</h3>
       <div style="display:flex;gap:7px;flex-wrap:wrap;">
+        <button class="sm" id="btn-dedup">Fix duplicates</button>
         <button class="red sm" id="btn-clr-finished">Clear finished tips</button>
         <button class="red sm" id="btn-clrp">Clear ALL tips</button>
         <button class="red sm" id="btn-nuke">Delete everything</button>
@@ -748,16 +778,26 @@ function buildStandings(){
   const grp=S.currentGroupId?(S.d.groups||[]).find(g=>g.id===S.currentGroupId):null;
   const de=S.lang==='DE';
   const finished=S.d.matches.filter(m=>m.actualHome!=null&&m.actualAway!=null&&m.stage!=='Group Stage');
-  const common=finished.filter(m=>users.every(u=>S.d.predictions[pk(m.id,u.id)]!=null));
+
+  // For common games: only consider users who have tipped at least once (ignore untipped users)
+  const activeUsers=users.filter(u=>finished.some(m=>S.d.predictions[pk(m.id,u.id)]!=null));
+  const common=activeUsers.length>0
+    ?finished.filter(m=>activeUsers.every(u=>S.d.predictions[pk(m.id,u.id)]!=null))
+    :[];
+
   const stats=users.map(u=>{
     let cp=0,ce=0,op=0,oe=0,opicks=0;
     common.forEach(m=>{const p=S.d.predictions[pk(m.id,u.id)];const v=pts(p,m);if(v!=null){cp+=v;if(v>=(S.d.settings.exact??4)&&v>0)ce++;}});
     finished.forEach(m=>{const p=S.d.predictions[pk(m.id,u.id)];if(p)opicks++;const v=pts(p,m);if(v!=null){op+=v;if(v>=(S.d.settings.exact??4)&&v>0)oe++;}});
     return{id:u.id,name:u.name,cp,ce,op,oe,opicks};
   });
+
   const byCommon=[...stats].sort((a,b)=>b.cp-a.cp||b.ce-a.ce||b.op-a.op);
   const byOverall=[...stats].sort((a,b)=>b.op-a.op||b.oe-a.oe||b.opicks-a.opicks);
-  const showBoth=users.length>1;
+
+  // Always show both tables for everyone when there are finished games
+  const showBoth=finished.length>0;
+
   const RNK=['\uD83E\uDD47','\uD83E\uDD48','\uD83E\uDD49'];
   function makeTable(ranked,col){
     if(!ranked.length)return '<div class="empty">'+(de?'Noch keine Spieler.':'No players yet.')+'</div>';
@@ -765,12 +805,14 @@ function buildStandings(){
       const isMe=r.id===S.me?.id;
       const p=col==='c'?r.cp:r.op;
       const e=col==='c'?r.ce:r.oe;
+      const pk2=col==='c'?common.length:r.opicks;
       const top=i===0&&p>0;
       const rk=i<3?RNK[i]:(i+1)+'';
       return '<tr class="'+(isMe?'me-row':'')+'">'
         +'<td class="rank '+(top?'r1':'')+'" style="font-size:'+(i<3?'15px':'12px')+'">'+rk+'</td>'
         +'<td style="font-weight:'+(top?'700':'400')+'">'+esc(r.name)+'</td>'
         +'<td class="mn">'+e+'</td>'
+        +'<td class="mn" style="color:var(--muted)">'+pk2+'</td>'
         +'<td class="pts" style="'+(top?'font-size:15px;':'')+'">'+p+'</td>'
         +'</tr>';
     }).join('');
@@ -779,20 +821,28 @@ function buildStandings(){
       +'<th style="width:26px;"></th>'
       +'<th>'+(de?'Spieler':'Player')+'</th>'
       +'<th style="text-align:right">'+(de?'Exakt':'Exact')+'</th>'
+      +'<th style="text-align:right">'+(de?'Tipps':'Picks')+'</th>'
       +'<th style="text-align:right">'+(de?'Pkt':'Pts')+'</th>'
       +'</tr></thead>'
       +'<tbody>'+rows+'</tbody></table>';
   }
-  const cHdr='<div style="font-size:9px;font-family:monospace;text-transform:uppercase;letter-spacing:.07em;color:var(--gold);margin-bottom:7px;">'
-    +(de?'Gleiche Spiele':'Common games')+' \u2022 '+common.length+'/'+finished.length+'</div>';
+
+  const cNote=activeUsers.length<users.length
+    ?'<span style="color:var(--muted);font-size:9px;"> ('+(de?'ohne Untippte':'excl. untipped')+')</span>'
+    :'';
+  const cHdr='<div style="font-size:9px;font-family:monospace;text-transform:uppercase;letter-spacing:.07em;color:var(--gold);margin-bottom:7px;display:flex;align-items:center;gap:4px;">'
+    +(de?'Gleiche Spiele':'Common games')+' \u2022 '+common.length+'/'+finished.length
+    +cNote+'</div>';
   const oHdr='<div style="font-size:9px;font-family:monospace;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);margin-bottom:7px;">'
     +(de?'Gesamt':'Overall')+' \u2022 '+finished.length+' '+(de?'gespielt':'played')+'</div>';
+
   const body=showBoth
-    ?'<div style="display:flex;gap:16px;flex-wrap:wrap;">'
-      +'<div style="flex:1;min-width:130px;">'+cHdr+makeTable(byCommon,'c')+'</div>'
-      +'<div style="flex:1;min-width:130px;">'+oHdr+makeTable(byOverall,'o')+'</div>'
+    ?'<div style="display:flex;gap:18px;flex-wrap:wrap;">'
+      +'<div style="flex:1;min-width:160px;">'+cHdr+makeTable(byCommon,'c')+'</div>'
+      +'<div style="flex:1;min-width:160px;">'+oHdr+makeTable(byOverall,'o')+'</div>'
       +'</div>'
-    :oHdr+makeTable(byOverall,'o');
+    :'<div>'+oHdr+makeTable(byOverall,'o')+'</div>';
+
   const title=de?'Tabelle':'Standings';
   return '<section class="panel"><div class="ph"><h2>'+title+(grp?' &mdash; '+esc(grp.name):'')+' </h2></div>'+body+'</section>';
 }
@@ -1140,6 +1190,36 @@ function wireEvents(){
     });
   });
   /* Danger */
+  q('btn-dedup')?.addEventListener('click',async()=>{
+    // Run dedup logic manually and save
+    const before=S.d.matches.length;
+    const koMap={};S.d.matches.forEach(m=>{if(!m.kickoffISO)return;const k=m.kickoffISO.slice(0,16);(koMap[k]||(koMap[k]=[])).push(m);});
+    const keep=new Set();const remap={};
+    Object.values(koMap).forEach(grp=>{
+      if(grp.length<2){grp.forEach(m=>keep.add(m.id));return;}
+      const scored=grp.map(m=>({m,s:(m.matchNum?10:0)+(m.actualHome!=null?5:0)+(m.home&&m.home!=='TBD'?3:0)+(m.away&&m.away!=='TBD'?3:0)+(m.penWinner?2:0)})).sort((a,b)=>b.s-a.s);
+      const win=scored[0].m;keep.add(win.id);
+      scored.slice(1).forEach(({m:oth})=>{
+        if(!win.matchNum&&oth.matchNum)win.matchNum=oth.matchNum;
+        if(win.home==='TBD'&&oth.home&&oth.home!=='TBD')win.home=oth.home;
+        if(win.away==='TBD'&&oth.away&&oth.away!=='TBD')win.away=oth.away;
+        if(win.actualHome==null&&oth.actualHome!=null){win.actualHome=oth.actualHome;win.actualAway=oth.actualAway;}
+        if(!win.penWinner&&oth.penWinner){win.penWinner=oth.penWinner;win.penHome=oth.penHome;win.penAway=oth.penAway;}
+        remap[oth.id]=win.id;
+      });
+    });
+    S.d.matches=S.d.matches.filter(m=>keep.has(m.id));
+    Object.keys(remap).forEach(oldId=>{
+      Object.keys(S.d.predictions).forEach(k=>{
+        if(k.startsWith(oldId+'__')){const nk=remap[oldId]+'__'+k.slice(oldId.length+2);if(!S.d.predictions[nk])S.d.predictions[nk]=S.d.predictions[k];delete S.d.predictions[k];}
+      });
+    });
+    const removed=before-S.d.matches.length;
+    advanceBracket();
+    try{await dbSave();}catch(e){alert('Save failed: '+e.message);return;}
+    alert('Done! Removed '+removed+' duplicate match'+(removed!==1?'es':'')+'. Reload to see changes.');
+    render();
+  });
   q('btn-clr-finished')?.addEventListener('click',async()=>{
     const done=S.d.matches.filter(m=>m.actualHome!=null&&m.actualAway!=null).map(m=>m.id);
     if(!done.length){alert('No finished matches yet.');return;}
