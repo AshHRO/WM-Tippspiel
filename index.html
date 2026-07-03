@@ -210,6 +210,24 @@ const BKT_RIGHT={
 const FLAGS={'Germany':'🇩🇪','France':'🇫🇷','Spain':'🇪🇸','Portugal':'🇵🇹','England':'🏴󠁧󠁢󠁥󠁮󠁧󠁿','Netherlands':'🇳🇱','Belgium':'🇧🇪','Switzerland':'🇨🇭','Austria':'🇦🇹','Croatia':'🇭🇷','Denmark':'🇩🇰','Sweden':'🇸🇪','Norway':'🇳🇴','Poland':'🇵🇱','Serbia':'🇷🇸','Turkey':'🇹🇷','Scotland':'🏴󠁧󠁢󠁳󠁣󠁴󠁿','Ukraine':'🇺🇦','Brazil':'🇧🇷','Argentina':'🇦🇷','Colombia':'🇨🇴','Ecuador':'🇪🇨','Paraguay':'🇵🇾','Uruguay':'🇺🇾','Chile':'🇨🇱','Bolivia':'🇧🇴','Peru':'🇵🇪','Venezuela':'🇻🇪','USA':'🇺🇸','Canada':'🇨🇦','Mexico':'🇲🇽','Costa Rica':'🇨🇷','Jamaica':'🇯🇲','Panama':'🇵🇦','Honduras':'🇭🇳','El Salvador':'🇸🇻','Trinidad and Tobago':'🇹🇹','Morocco':'🇲🇦','Nigeria':'🇳🇬','Senegal':'🇸🇳','Algeria':'🇩🇿','Egypt':'🇪🇬','Ivory Coast':'🇨🇮','Cameroon':'🇨🇲','Ghana':'🇬🇭','Congo DR':'🇨🇩','South Africa':'🇿🇦','Tunisia':'🇹🇳','Mali':'🇲🇱','Cape Verde':'🇨🇻','Japan':'🇯🇵','South Korea':'🇰🇷','Australia':'🇦🇺','Iran':'🇮🇷','Saudi Arabia':'🇸🇦','Iraq':'🇮🇶','Jordan':'🇯🇴','Uzbekistan':'🇺🇿','Qatar':'🇶🇦','New Zealand':'🇳🇿','Bosnia and Herzegovina':'🇧🇦','Kosovo':'🇽🇰'};
 function flag(n){return FLAGS[n]||'';}
 
+/* ── German team name translations ── */
+const TEAM_DE={'Germany':'Deutschland','France':'Frankreich','Spain':'Spanien',
+'Netherlands':'Niederlande','Belgium':'Belgien','Switzerland':'Schweiz','Austria':'Österreich',
+'Croatia':'Kroatien','Sweden':'Schweden','Norway':'Norwegen','Poland':'Polen','Serbia':'Serbien',
+'Turkey':'Türkei','Denmark':'Dänemark','Scotland':'Schottland','Ukraine':'Ukraine',
+'Brazil':'Brasilien','Argentina':'Argentinien','Colombia':'Kolumbien','Bolivia':'Bolivien',
+'Canada':'Kanada','Mexico':'Mexiko','USA':'USA','Costa Rica':'Costa Rica','Jamaica':'Jamaika',
+'Morocco':'Marokko','Senegal':'Senegal','Ivory Coast':'Elfenbeinküste','Nigeria':'Nigeria',
+'Ghana':'Ghana','Egypt':'Ägypten','South Africa':'Südafrika','Algeria':'Algerien',
+'Congo DR':'DR Kongo','Tunisia':'Tunesien','Cameroon':'Kamerun','Cape Verde':'Kap Verde',
+'Japan':'Japan','South Korea':'Südkorea','Australia':'Australien','Saudi Arabia':'Saudi-Arabien',
+'Iran':'Iran','Iraq':'Irak','Jordan':'Jordanien','Qatar':'Katar','Uzbekistan':'Usbekistan',
+'New Zealand':'Neuseeland','Bosnia and Herzegovina':'Bosnien-Herzegowina',
+'Kosovo':'Kosovo','Trinidad and Tobago':'Trinidad und Tobago','Ecuador':'Ecuador',
+'Paraguay':'Paraguay','Uruguay':'Uruguay','Chile':'Chile','Peru':'Peru','Venezuela':'Venezuela',
+'Portugal':'Portugal','England':'England','Poland':'Polen'};
+function tTeam(n){return S.lang==='DE'?(TEAM_DE[n]||n):n;}
+
 /* ── i18n ── */
 const LANG={
   EN:{r32:'Round of 32',r16:'Round of 16',qf:'Quarter-final',sf:'Semi-final',fin:'Final',third:'3rd Place',grp:'Group Stage',
@@ -218,7 +236,7 @@ const LANG={
       penLbl:'Pen winner:',penScLbl:'Pen score:',res:'Result',sv:'Save',ref:'Refresh',out:'Log out',adm:'Admin',
       yourName:'Your name',pw:'Password',enter:'Enter →',
       newMsg:"New? Enter a name and choose a password — you're registered automatically.",admAcc:'Admin access',
-      exact:'Exact',gd:'Goal diff',win:'Winner',picks:'Picks',pts:'Pts',player:'Player',tip:'Tip',
+      exact:'Exact',gd:'Goal diff',win:'Winner',picks:'Picks',pts:'Pts',player:'Player',tip:'Tip',gesamt:'Overall',gleich:'Common',eLabel:'E',dLabel:'D',tLabel:'T',wLabel:'W',gleichInfo:(n,t)=>`${n}/${t} games where all tipped`,
       all:'All',upcoming:'Upcoming',done:'Finished',
       grpSec:'Groups',usersSec:'Users',scoringSec:'Scoring',addMatchSec:'Add match',
       changePwSec:'Change password',dangerSec:'Danger',
@@ -230,7 +248,7 @@ const LANG={
       penLbl:'Elfmeter-Sieger:',penScLbl:'Elfmeter:',res:'Ergebnis',sv:'Speichern',ref:'Laden',out:'Abmelden',adm:'Admin',
       yourName:'Dein Name',pw:'Passwort',enter:'Anmelden →',
       newMsg:'Neu? Gib einen Namen ein und wähle ein Passwort — du wirst automatisch registriert.',admAcc:'Admin-Zugang',
-      exact:'Exakt',gd:'Tordiff.',win:'Sieger',picks:'Tipps',pts:'Pkt',player:'Spieler',tip:'Tipp',
+      exact:'Exakt',gd:'Tordiff.',win:'Sieger',picks:'Tipps',pts:'Pkt',player:'Spieler',tip:'Tipp',gesamt:'Gesamt',gleich:'Gleich',eLabel:'E',dLabel:'D',tLabel:'T',wLabel:'F',gleichInfo:(n,t)=>`${n}/${t} Spiele, bei denen alle getippt haben`,
       all:'Alle',upcoming:'Bevorstehend',done:'Abgeschlossen',
       grpSec:'Gruppen',usersSec:'Spieler',scoringSec:'Wertung',addMatchSec:'Spiel hinzufügen',
       changePwSec:'Passwort ändern',dangerSec:'Achtung',
@@ -777,93 +795,109 @@ function buildStandings(){
   const users=visibleUsers();
   const grp=S.currentGroupId?(S.d.groups||[]).find(g=>g.id===S.currentGroupId):null;
   const de=S.lang==='DE';
+  const s=S.d.settings;
 
   const finished=S.d.matches.filter(m=>m.actualHome!=null&&m.actualAway!=null&&m.stage!=='Group Stage');
-  // Common = games where ALL visible users tipped (strict — no "excl. untipped" shortcut)
   const common=finished.filter(m=>users.every(u=>S.d.predictions[pk(m.id,u.id)]!=null));
 
-  const stats=users.map(u=>{
-    let cp=0,ce=0,op=0,oe=0,opicks=0,cpicks=0;
-    common.forEach(m=>{
-      const p=S.d.predictions[pk(m.id,u.id)];
-      if(p)cpicks++;
-      const v=pts(p,m);
-      if(v!=null){cp+=v;if(v>=(S.d.settings.exact??4)&&v>0)ce++;}
+  /* Full breakdown: exact | goal diff | tendency | wrong + pts */
+  function bk(uid,matches){
+    let e=0,d=0,ten=0,w=0,p=0,picks=0;
+    matches.forEach(m=>{
+      const pred=S.d.predictions[pk(m.id,uid)];if(!pred)return;picks++;
+      const v=pts(pred,m);if(v==null)return;p+=v;
+      if(v>=(s.exact??4))e++;
+      else if(v===(s.goaldiff??3))d++;
+      else if(v===(s.outcome??2))ten++;
+      else w++;
     });
-    finished.forEach(m=>{
-      const p=S.d.predictions[pk(m.id,u.id)];
-      if(p)opicks++;
-      const v=pts(p,m);
-      if(v!=null){op+=v;if(v>=(S.d.settings.exact??4)&&v>0)oe++;}
-    });
-    return{id:u.id,name:u.name,cp,ce,op,oe,opicks,cpicks};
-  });
+    return{e,d,ten,w,pts:p,picks};
+  }
 
-  // Ranked by common pts first, overall pts as tiebreak
-  const ranked=[...stats].sort((a,b)=>b.cp-a.cp||b.op-a.op||b.oe-a.oe||b.opicks-a.opicks);
-  const RNK=['\uD83E\uDD47','\uD83E\uDD48','\uD83E\uDD49'];
+  const rows=users.map(u=>({
+    id:u.id,name:u.name,
+    allPicks:Object.keys(S.d.predictions).filter(k=>k.endsWith('__'+u.id)).length,
+    g:bk(u.id,finished),
+    gl:bk(u.id,common)
+  })).sort((a,b)=>b.g.pts-a.g.pts||b.g.e-a.g.e||b.g.d-a.g.d||b.allPicks-a.allPicks);
 
-  const hasCommon=common.length>0;
-  const hasFinished=finished.length>0;
+  const MED=['\uD83E\uDD47','\uD83E\uDD48','\uD83E\uDD49'];
+  const EL=de?'E':'E', DL=de?'D':'D', TL=de?'T':'T', WL=de?'F':'W';
 
-  const comLabel=de?'Gleich':'Common';
-  const totLabel=de?'Gesamt':'Overall';
-  const exLabel=de?'Exakt':'Exact';
-  const pkLabel=de?'Tipps':'Picks';
-  const pktLabel=de?'Pkt':'Pts';
+  /* compact breakdown cell: "2|1|1|0" monospace then pts in gold/muted */
+  function bkCell(bd,gold){
+    const clr=gold?'var(--gold)':'var(--chalk)';
+    const muted='var(--muted)';
+    return '<td style="text-align:right;padding:5px 6px;white-space:nowrap;vertical-align:middle;">'
+      +'<div style="font-family:\'JetBrains Mono\',monospace;font-size:11px;color:'+muted+';letter-spacing:.02em;">'
+      +`<span style="color:var(--green)">${bd.e}</span>`
+      +`<span style="color:${muted}">|</span>`
+      +`<span style="color:var(--chalk)">${bd.d}</span>`
+      +`<span style="color:${muted}">|</span>`
+      +`<span style="color:var(--chalk)">${bd.ten}</span>`
+      +`<span style="color:${muted}">|</span>`
+      +`<span style="color:var(--red)">${bd.w}</span>`
+      +'</div>'
+      +`<div style="font-family:'JetBrains Mono',monospace;font-weight:700;font-size:14px;color:${clr};">${bd.pts} <span style="font-size:9px;opacity:.6;">${de?'Pkt':'pts'}</span></div>`
+      +'</td>';
+  }
 
-  let rows='';
-  if(!ranked.length){
-    rows='<tr><td colspan="7" class="empty">'+(de?'Noch keine Spieler.':'No players yet.')+'</td></tr>';
-  } else {
-    rows=ranked.map((r,i)=>{
+  const comLbl=de?'Gleich':'Common';
+  const totLbl=de?'Gesamt':'Overall';
+  const subhdr=`<div style="font-family:'JetBrains Mono',monospace;font-size:9px;color:var(--muted);letter-spacing:.06em;margin-top:2px;">${EL}|${DL}|${TL}|${WL}</div>`;
+
+  const commonInfo=de
+    ?`Gleiche: ${common.length}/${finished.length} Spiele, bei denen alle getippt haben`
+    :`Common: ${common.length}/${finished.length} games tipped by everyone`;
+
+  const note=common.length===0&&finished.length>0
+    ?`<p style="font-size:11px;color:var(--muted);font-family:monospace;margin:0 0 8px;">${de?'Noch keine Spiele, bei denen alle getippt haben.':'No games tipped by everyone yet.'}</p>`
+    :'';
+
+  let tbody='';
+  if(!rows.length){
+    tbody=`<tr><td colspan="5" class="empty">${de?'Noch keine Spieler.':'No players yet.'}</td></tr>`;
+  }else{
+    tbody=rows.map((r,i)=>{
       const isMe=r.id===S.me?.id;
-      const top=i===0&&r.cp>0;
-      const rk=i<3?RNK[i]:(i+1)+'';
-      const cpDiffers=r.cp!==r.op;
-      return '<tr class="'+(isMe?'me-row':'')+'">'
-        +'<td class="rank '+(top?'r1':'')+'" style="font-size:'+(i<3?'15px':'12px')+'">'+rk+'</td>'
-        +'<td style="font-weight:'+(top?'700':'400')+'">'+esc(r.name)+'</td>'
-        +'<td class="mn">'+r.ce+'</td>'
-        +'<td class="mn">'+r.cpicks+'</td>'
-        +'<td class="pts" style="'+(top?'font-size:15px;':'')+'">'+r.cp+'</td>'
-        // divider
-        +'<td style="color:var(--line);padding:0 4px;font-size:10px;">|</td>'
-        // overall col — grey if same as common, gold if different
-        +'<td class="pts" style="color:'+(cpDiffers?'var(--gold)':'var(--muted)')+'">'+r.op+'</td>'
-        +'</tr>';
+      const top=i===0&&r.g.pts>0;
+      const rk=i<3?`<span style="font-size:15px;">${MED[i]}</span>`:`<span class="rank">${i+1}</span>`;
+      return `<tr class="${isMe?'me-row':''}">
+        <td style="width:28px;text-align:center;">${rk}</td>
+        <td style="font-size:13px;font-weight:${top?'700':'400'};">${esc(r.name)}</td>
+        <td style="text-align:right;font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--muted);padding:5px 6px;">${r.allPicks}</td>
+        ${bkCell(r.g,true)}
+        ${bkCell(r.gl,false)}
+      </tr>`;
     }).join('');
   }
 
-  const commonInfo=de
-    ?'Gleiche: '+common.length+'/'+finished.length+' Spiele, in denen alle getippt haben'
-    :'Common: '+common.length+'/'+finished.length+' games tipped by everyone';
-  const note=common.length===0&&finished.length>0
-    ?(de?'Noch keine Spiele, bei denen alle getippt haben.':'No games tipped by everyone yet.')
-    :'';
-
-  const table='<table class="st" style="width:100%;">'
-    +'<thead><tr>'
-    +'<th style="width:26px;"></th>'
-    +'<th>'+(de?'Spieler':'Player')+'</th>'
-    +'<th style="text-align:right">'+exLabel+'</th>'
-    +'<th style="text-align:right">'+pkLabel+'</th>'
-    +'<th style="text-align:right;color:var(--gold)">'+comLabel+' '+pktLabel+'</th>'
-    +'<th style="padding:0"></th>'
-    +'<th style="text-align:right;color:var(--muted)">'+totLabel+' '+pktLabel+'</th>'
-    +'</tr></thead>'
-    +'<tbody>'+rows+'</tbody>'
-    +'</table>';
-
   const title=de?'Tabelle':'Standings';
-  return '<section class="panel">'
-    +'<div class="ph">'
-    +'<h2>'+title+(grp?' &mdash; '+esc(grp.name):'')+' </h2>'
-    +'<span style="font-family:monospace;font-size:10px;color:var(--muted);">'+commonInfo+'</span>'
-    +'</div>'
-    +(note?'<p style="font-size:11px;color:var(--muted);font-family:monospace;margin:0 0 8px;">'+note+'</p>':'')
-    +table
-    +'</section>';
+  return `<section class="panel">
+    <div class="ph">
+      <h2>${title}${grp?' &mdash; '+esc(grp.name):''}</h2>
+      <span style="font-family:monospace;font-size:10px;color:var(--muted);text-align:right;">${commonInfo}</span>
+    </div>
+    ${note}
+    <div style="overflow-x:auto;">
+    <table class="st" style="min-width:380px;">
+      <thead><tr>
+        <th style="width:26px;"></th>
+        <th>${de?'Spieler':'Player'}</th>
+        <th style="text-align:right;font-size:10px;">${de?'Tipps':'Picks'}</th>
+        <th style="text-align:right;">${totLbl}${subhdr}</th>
+        <th style="text-align:right;">${comLbl}${subhdr}</th>
+      </tr></thead>
+      <tbody>${tbody}</tbody>
+    </table>
+    </div>
+    <div style="margin-top:8px;font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--muted);display:flex;gap:12px;flex-wrap:wrap;">
+      <span><span style="color:var(--green)">${EL}</span> = ${de?'Exakt':'Exact'}</span>
+      <span>${DL} = ${de?'Tordiff.':'Goal diff'}</span>
+      <span>${TL} = ${de?'Tendenz':'Tendency'}</span>
+      <span><span style="color:var(--red)">${WL}</span> = ${de?'Falsch':'Wrong'}</span>
+    </div>
+  </section>`;
 }
 
 
@@ -914,12 +948,12 @@ function buildCard(m){
           <span class="vd">-</span>
           <input class="dg" type="number" min="0" max="30" id="pa-${m.id}" value="${av}"${st?' disabled':''}>
         </div>
-        <span class="tn aw">${flag(m.away)} ${esc(m.away)}</span>
+        <span class="tn aw">${flag(m.away)} ${esc(tTeam(m.away))}</span>
       </div>
       ${ko&&!st?`<div class="pen-row" id="pen-row-${m.id}" style="display:${showPen?'flex':'none'}">
         <span class="pen-lbl">${t('penLbl')}</span>
-        <button class="pen-btn${penH?' pri':' ghost'}" data-a="pen" data-m="${m.id}" data-v="H">${flag(m.home)} ${esc(m.home)}</button>
-        <button class="pen-btn${penA?' pri':' ghost'}" data-a="pen" data-m="${m.id}" data-v="A">${flag(m.away)} ${esc(m.away)}</button>
+        <button class="pen-btn${penH?' pri':' ghost'}" data-a="pen" data-m="${m.id}" data-v="H">${flag(m.home)} ${esc(tTeam(m.home))}</button>
+        <button class="pen-btn${penA?' pri':' ghost'}" data-a="pen" data-m="${m.id}" data-v="A">${flag(m.away)} ${esc(tTeam(m.away))}</button>
       </div>`:''}
       <div class="pick-act">${!st?`<button class="pri sm" data-a="save-pick" data-m="${m.id}">${myPred!=null?t('updTip'):t('saveTip')}</button>`:''}</div>
       ${st?`<div class="lock-n">${t('lock')}</div>`:(myPred!=null?`<div class="saved-n">${t('saved')}${(myDraw&&myPred.penWinner)?' · pen: '+(myPred.penWinner==='H'?m.home:m.away):''}</div>`:'')}`;}
@@ -949,8 +983,8 @@ function buildCard(m){
   </div>
   ${st&&S.isAdmin&&ko?`<div class="pen-row" id="pen-res-${m.id}" style="display:${hasDraw?'flex':'none'}">
     <span class="pen-lbl">${t('penLbl')}</span>
-    <button class="pen-btn${resH?' pri':' ghost'}" data-a="pen-res" data-m="${m.id}" data-v="H">${flag(m.home)} ${esc(m.home)}</button>
-    <button class="pen-btn${resA?' pri':' ghost'}" data-a="pen-res" data-m="${m.id}" data-v="A">${flag(m.away)} ${esc(m.away)}</button>
+    <button class="pen-btn${resH?' pri':' ghost'}" data-a="pen-res" data-m="${m.id}" data-v="H">${flag(m.home)} ${esc(tTeam(m.home))}</button>
+    <button class="pen-btn${resA?' pri':' ghost'}" data-a="pen-res" data-m="${m.id}" data-v="A">${flag(m.away)} ${esc(tTeam(m.away))}</button>
   </div>
   <div class="pen-row" id="pen-score-${m.id}" style="display:${hasDraw?'flex':'none'}">
     <span class="pen-lbl">${t('penScLbl')}</span>
@@ -1084,16 +1118,16 @@ function buildBktM(m,isFinal=false){
     </div>
     <div class="bkt-team ${hCls}">
       <span class="bkt-flag">${flag(m.home)}</span>
-      <span class="bkt-tn">${esc(m.home)}</span>
+      <span class="bkt-tn">${esc(tTeam(m.home))}</span>
       ${hSc!=null?`<span class="bkt-sc${w==='H'?' won':''}">${hSc}</span>`:''}
     </div>
     <div class="bkt-div"></div>
     <div class="bkt-team ${aCls}">
       <span class="bkt-flag">${flag(m.away)}</span>
-      <span class="bkt-tn">${esc(m.away)}</span>
+      <span class="bkt-tn">${esc(tTeam(m.away))}</span>
       ${aSc!=null?`<span class="bkt-sc${w==='A'?' won':''}">${aSc}</span>`:''}
     </div>
-    ${hasr&&isPens?`<div class="bkt-ko">${w==='H'?esc(m.home):esc(m.away)} wins on pens</div>`:''}
+    ${hasr&&isPens?`<div class="bkt-ko">${w==='H'?esc(tTeam(m.home)):esc(tTeam(m.away))} wins on pens</div>`:''}
   </div>`;
 }
 
