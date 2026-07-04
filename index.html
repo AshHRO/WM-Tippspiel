@@ -307,7 +307,7 @@ const FIXTURES=[
 const EMPTY={matches:[],users:[],predictions:{},groups:[],settings:{exact:4,goaldiff:3,outcome:2,pen:1},adminPw:null,version:0};
 const S={
   d:{...EMPTY},me:null,isAdmin:false,adminOpen:false,editingId:null,
-  tab:'tipps',matchFilter:'upcoming',currentGroupId:null,resetPwUserId:null,proxyPen:{},
+  tab:'tipps',matchFilter:'upcoming',currentGroupId:null,resetPwUserId:null,proxyPen:{},standingsSort:'gesamt',
   pendingPen:{},pendingPenRes:{},
   lang:'EN',  // DE or EN
   syncStatus:null,syncMsg:'',expandedReveal:{},localVersion:-1,lastLoaded:null,
@@ -814,12 +814,16 @@ function buildStandings(){
     return{e,d,ten,w,pts:p,picks};
   }
 
+  const sortByGleich=S.standingsSort==='gleich';
   const rows=users.map(u=>({
     id:u.id,name:u.name,
     allPicks:Object.keys(S.d.predictions).filter(k=>k.endsWith('__'+u.id)).length,
     g:bk(u.id,finished),
     gl:bk(u.id,common)
-  })).sort((a,b)=>b.g.pts-a.g.pts||b.g.e-a.g.e||b.g.d-a.g.d||b.allPicks-a.allPicks);
+  })).sort((a,b)=>{
+    const x=sortByGleich?a.gl:a.g,y=sortByGleich?b.gl:b.g;
+    return y.pts-x.pts||y.e-x.e||y.d-x.d||b.allPicks-a.allPicks;
+  });
 
   const MED=['\uD83E\uDD47','\uD83E\uDD48','\uD83E\uDD49'];
   const EL=de?'E':'E', DL=de?'D':'D', TL=de?'T':'T', WL=de?'F':'W';
@@ -885,8 +889,12 @@ function buildStandings(){
         <th style="width:26px;"></th>
         <th>${de?'Spieler':'Player'}</th>
         <th style="text-align:right;font-size:10px;">${de?'Tipps':'Picks'}</th>
-        <th style="text-align:right;">${totLbl}${subhdr}</th>
-        <th style="text-align:right;">${comLbl}${subhdr}</th>
+        <th style="text-align:right;cursor:pointer;user-select:none;" data-a="sort-standings" data-v="gesamt">
+          ${totLbl}${S.standingsSort==='gesamt'?' <span style=\"color:var(--gold)\">↓</span>':''}${subhdr}
+        </th>
+        <th style="text-align:right;cursor:pointer;user-select:none;" data-a="sort-standings" data-v="gleich">
+          ${comLbl}${S.standingsSort==='gleich'?' <span style=\"color:var(--gold)\">↓</span>':''}${subhdr}
+        </th>
       </tr></thead>
       <tbody>${tbody}</tbody>
     </table>
@@ -1402,6 +1410,11 @@ function wireEvents(){
       try{await dbSave();}catch(e){alert('Could not save: '+e.message);}render();
     });
   });
+  /* Standings sort */
+  document.querySelectorAll('[data-a="sort-standings"]').forEach(btn=>{
+    btn.addEventListener('click',()=>{S.standingsSort=btn.dataset.v;render();});
+  });
+
   /* Reset user password */
   document.querySelectorAll('[data-a="rst-pw"]').forEach(btn=>{
     btn.addEventListener('click',()=>{
@@ -1609,17 +1622,69 @@ function buildNetworkErrorScreen(errMsg){
   </div>`;
 }
 
+/* ── ESPN sync: fetch WC2026 results by date (no API key needed) ── */
+async function syncESPN(){
+  const ti=v=>{const n=parseInt(v,10);return isNaN(n)?null:n;};
+  const today=new Date();
+  const dates=[];
+  // Fetch last 14 days and next 7 days within WC2026 window
+  for(let i=14;i>=-7;i--){
+    const d=new Date(today);d.setDate(d.getDate()-i);
+    const s=d.toISOString().slice(0,10).replace(/-/g,'');
+    if(s>='20260628'&&s<='20260719')dates.push(s);
+  }
+  if(!dates.length)return null;
+  const all=[];
+  for(const date of dates){
+    try{
+      const data=await tfetch(`https://site.api.espn.com/apis/site/v2/sports/soccer/fifa.world/scoreboard?dates=${date}`,10000);
+      (data?.events||[]).forEach(ev=>{
+        const comp=ev.competitions?.[0];if(!comp)return;
+        const hc=comp.competitors?.find(c=>c.homeAway==='home');
+        const ac=comp.competitors?.find(c=>c.homeAway==='away');
+        if(!hc||!ac||!hc.team?.displayName||!ac.team?.displayName)return;
+        const done=ev.status?.type?.completed;
+        const note=(comp.notes||[]).map(n=>n.text||'').join(' ');
+        // Try to extract pen score from note (e.g. "Germany wins on penalties (3-4)")
+        let penW=null,penH=null,penA=null;
+        const penMatch=note.match(/penalt/i);
+        if(penMatch){
+          // Figure out who won on pens from note
+          const homeWins=new RegExp(hc.team.displayName,'i').test(note.split('penalt')[0]);
+          penW=homeWins?'H':'A';
+          const scores=note.match(/\((\d+)[–\-](\d+)\)/);
+          if(scores){penH=parseInt(scores[1],10);penA=parseInt(scores[2],10);}
+        }
+        all.push({
+          stage:'',
+          home:hc.team.displayName,
+          away:ac.team.displayName,
+          kickoffISO:ev.date||'',
+          actualHome:done?ti(hc.score):null,
+          actualAway:done?ti(ac.score):null,
+          penWinner:penW,penHome:penH,penAway:penA
+        });
+      });
+    }catch(e){/* skip date */}
+  }
+  return all.length?all:null;
+}
+
 /* ── Auto-sync results from web every 10 min ── */
 async function autoSync(){
   if(!configured())return;
   try{
     let m=null;
-    try{const d=await tfetch('https://worldcup26.ir/get/games',15000);const r=parseWC(d);if(r.length)m=r;}catch(e){}
-    if(!m){try{const d=await tfetch('https://www.thesportsdb.com/api/v1/json/3/eventsseason.php?id=4429&s=2026',15000);const r=parseSDB(d?.events);if(r.length)m=r;}catch(e){}}
-    if(!m)return;
+    // ESPN first (no API key, good CORS support, date-based fetching)
+    try{m=await syncESPN();}catch(e){}
+    // worldcup26.ir fallback
+    if(!m||!m.length){try{const d=await tfetch('https://worldcup26.ir/get/games',12000);const r=parseWC(d);if(r.length)m=r;}catch(e){}}
+    // TheSportsDB second fallback
+    if(!m||!m.length){try{const d=await tfetch('https://www.thesportsdb.com/api/v1/json/3/eventsseason.php?id=4429&s=2026',12000);const r=parseSDB(d?.events);if(r.length)m=r;}catch(e){}}
+    if(!m||!m.length)return;
     const{added,updated}=mergeFixtures(m);
     if(added||updated){advanceBracket();await dbSave();render();}
-  }catch(e){}
+  }catch(e){console.warn('autoSync error:',e);}
 }
 
 async function init(){
