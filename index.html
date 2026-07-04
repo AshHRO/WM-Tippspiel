@@ -237,7 +237,7 @@ const LANG={
       yourName:'Your name',pw:'Password',enter:'Enter →',
       newMsg:"New? Enter a name and choose a password — you're registered automatically.",admAcc:'Admin access',
       exact:'Exact',gd:'Goal diff',win:'Winner',picks:'Picks',pts:'Pts',player:'Player',tip:'Tip',gesamt:'Overall',gleich:'Common',eLabel:'E',dLabel:'D',tLabel:'T',wLabel:'W',gleichInfo:(n,t)=>`${n}/${t} games where all tipped`,
-      all:'All',upcoming:'Upcoming',done:'Finished',
+      live:'LIVE',all:'All',upcoming:'Upcoming',old:'Old',done:'Old',
       grpSec:'Groups',usersSec:'Users',scoringSec:'Scoring',addMatchSec:'Add match',
       changePwSec:'Change password',dangerSec:'Danger',
       clrPred:'Clear predictions',delAll:'Delete everything',
@@ -249,7 +249,7 @@ const LANG={
       yourName:'Dein Name',pw:'Passwort',enter:'Anmelden →',
       newMsg:'Neu? Gib einen Namen ein und wähle ein Passwort — du wirst automatisch registriert.',admAcc:'Admin-Zugang',
       exact:'Exakt',gd:'Tordiff.',win:'Sieger',picks:'Tipps',pts:'Pkt',player:'Spieler',tip:'Tipp',gesamt:'Gesamt',gleich:'Gleich',eLabel:'E',dLabel:'D',tLabel:'T',wLabel:'F',gleichInfo:(n,t)=>`${n}/${t} Spiele, bei denen alle getippt haben`,
-      all:'Alle',upcoming:'Bevorstehend',done:'Abgeschlossen',
+      live:'LIVE',all:'Alle',upcoming:'Bevorstehend',old:'Abgeschlossen',done:'Abgeschlossen',
       grpSec:'Gruppen',usersSec:'Spieler',scoringSec:'Wertung',addMatchSec:'Spiel hinzufügen',
       changePwSec:'Passwort ändern',dangerSec:'Achtung',
       clrPred:'Tipps löschen',delAll:'Alles löschen',
@@ -307,7 +307,7 @@ const FIXTURES=[
 const EMPTY={matches:[],users:[],predictions:{},groups:[],settings:{exact:4,goaldiff:3,outcome:2,pen:1},adminPw:null,version:0};
 const S={
   d:{...EMPTY},me:null,isAdmin:false,adminOpen:false,editingId:null,
-  tab:'tipps',matchFilter:'all',currentGroupId:null,resetPwUserId:null,
+  tab:'tipps',matchFilter:'upcoming',currentGroupId:null,resetPwUserId:null,proxyPen:{},
   pendingPen:{},pendingPenRes:{},
   lang:'EN',  // DE or EN
   syncStatus:null,syncMsg:'',expandedReveal:{},localVersion:-1,lastLoaded:null,
@@ -851,7 +851,7 @@ function buildStandings(){
     :`Common: ${common.length}/${finished.length} games tipped by everyone`;
 
   const note=common.length===0&&finished.length>0
-    ?`<p style="font-size:11px;color:var(--muted);font-family:monospace;margin:0 0 8px;">${de?'Noch keine Spiele, bei denen alle getippt haben.':'No games tipped by everyone yet.'}</p>`
+    ?`<p style="font-size:11px;color:var(--muted);font-family:monospace;margin:0 0 8px;">${de?'Noch keine Spiele, bei denen alle getippt haben. (Tipp-Abgabe aller Spieler erforderlich)':'No games tipped by everyone yet. All players must have tipped a game for it to count.'}</p>`
     :'';
 
   let tbody='';
@@ -904,18 +904,32 @@ function buildStandings(){
 function buildMatches(sorted){
   // Group Stage hidden — only knockout rounds matter
   const koOnly=sorted.filter(m=>m.stage!=='Group Stage');
+  /* Live = started but no result saved yet */
+  const liveMatches=koOnly.filter(m=>started(m)&&(m.actualHome==null||m.actualAway==null));
   const filtered=koOnly.filter(m=>{
+    if(S.matchFilter==='live')return started(m)&&(m.actualHome==null||m.actualAway==null);
     if(S.matchFilter==='upcoming')return!started(m);
-    if(S.matchFilter==='done')return m.actualHome!=null&&m.actualAway!=null;
+    if(S.matchFilter==='old'||S.matchFilter==='done')return m.actualHome!=null&&m.actualAway!=null;
     return true;
   });
   const groups={};filtered.forEach(m=>{(groups[m.stage]||(groups[m.stage]=[])).push(m);});
+  const liveCount=liveMatches.length;
   let html=`<div class="filter-bar">
-    <button class="filt-btn${S.matchFilter==='all'?' active':''}" data-a="filter" data-v="all">${t('all')}</button>
+    <button class="filt-btn${S.matchFilter==='live'?' active':''}" data-a="filter" data-v="live" style="${liveCount?'border-color:var(--red);color:var(--red);':''}">
+      ${liveCount?`<span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--red);margin-right:4px;animation:pulse 1.2s infinite;"></span>`:''}LIVE${liveCount?' ('+liveCount+')':''}
+    </button>
     <button class="filt-btn${S.matchFilter==='upcoming'?' active':''}" data-a="filter" data-v="upcoming">${t('upcoming')}</button>
-    <button class="filt-btn${S.matchFilter==='done'?' active':''}" data-a="filter" data-v="done">${t('done')}</button>
+    <button class="filt-btn${S.matchFilter==='old'||S.matchFilter==='done'?' active':''}" data-a="filter" data-v="old">${S.lang==='DE'?'Vergangen':'Old'}</button>
+    <button class="filt-btn${S.matchFilter==='all'?' active':''}" data-a="filter" data-v="all">${t('all')}</button>
   </div>`;
-  if(!filtered.length){html+=`<section class="panel"><div class="empty">${S.lang==='DE'?'Keine Spiele für diesen Filter.':'No matches for this filter.'}</div></section>`;return html;}
+  if(!filtered.length){
+    const emptyMsg=S.matchFilter==='live'
+      ?(S.lang==='DE'?'Keine laufenden Spiele gerade.':'No live matches right now.')
+      :S.matchFilter==='upcoming'
+      ?(S.lang==='DE'?'Keine bevorstehenden Spiele.':'No upcoming matches.')
+      :(S.lang==='DE'?'Keine Spiele für diesen Filter.':'No matches for this filter.');
+    html+=`<section class="panel"><div class="empty">${emptyMsg}</div></section>`;return html;
+  }
   let cards='';
   [...STAGE_ORDER,...Object.keys(groups).filter(s=>!STAGE_ORDER.includes(s))].forEach(s=>{
     if(!groups[s])return;
@@ -939,24 +953,27 @@ function buildCard(m){
     else{
       const hv=myPred!=null?myPred.home:'',av=myPred!=null?myPred.away:'';
       const myDraw=myPred&&myPred.home===myPred.away;
-      const curPen=S.pendingPen[m.id];const showPen=!st&&ko&&(myDraw||curPen!=null);
+      const curPen=S.pendingPen[m.id];const showPen=(!st||S.isAdmin)&&ko&&(myDraw||curPen!=null);
       const penH=curPen?curPen==='H':myPred?.penWinner==='H',penA=curPen?curPen==='A':myPred?.penWinner==='A';
-      pick=`<div class="tr">
-        <span class="tn">${flag(m.home)} ${esc(m.home)}</span>
+      /* Admin can tip/edit even after kickoff */
+    const adminCanTip=S.isAdmin;
+    const locked=st&&!adminCanTip;
+    pick=`<div class="tr">
+        <span class="tn">${flag(m.home)} ${esc(tTeam(m.home))}</span>
         <div class="sb">
-          <input class="dg" type="number" min="0" max="30" id="ph-${m.id}" value="${hv}"${st?' disabled':''}>
+          <input class="dg" type="number" min="0" max="30" id="ph-${m.id}" value="${hv}"${locked?' disabled':''}>
           <span class="vd">-</span>
-          <input class="dg" type="number" min="0" max="30" id="pa-${m.id}" value="${av}"${st?' disabled':''}>
+          <input class="dg" type="number" min="0" max="30" id="pa-${m.id}" value="${av}"${locked?' disabled':''}>
         </div>
         <span class="tn aw">${flag(m.away)} ${esc(tTeam(m.away))}</span>
       </div>
-      ${ko&&!st?`<div class="pen-row" id="pen-row-${m.id}" style="display:${showPen?'flex':'none'}">
+      ${ko&&(!st||adminCanTip)?`<div class="pen-row" id="pen-row-${m.id}" style="display:${showPen?'flex':'none'}">
         <span class="pen-lbl">${t('penLbl')}</span>
         <button class="pen-btn${penH?' pri':' ghost'}" data-a="pen" data-m="${m.id}" data-v="H">${flag(m.home)} ${esc(tTeam(m.home))}</button>
         <button class="pen-btn${penA?' pri':' ghost'}" data-a="pen" data-m="${m.id}" data-v="A">${flag(m.away)} ${esc(tTeam(m.away))}</button>
       </div>`:''}
-      <div class="pick-act">${!st?`<button class="pri sm" data-a="save-pick" data-m="${m.id}">${myPred!=null?t('updTip'):t('saveTip')}</button>`:''}</div>
-      ${st?`<div class="lock-n">${t('lock')}</div>`:(myPred!=null?`<div class="saved-n">${t('saved')}${(myDraw&&myPred.penWinner)?' · pen: '+(myPred.penWinner==='H'?m.home:m.away):''}</div>`:'')}`;}
+      <div class="pick-act">${!locked?`<button class="pri sm" data-a="save-pick" data-m="${m.id}">${myPred!=null?t('updTip'):t('saveTip')}</button>`:''}</div>
+      ${locked?'<div class="lock-n">'+t('lock')+'</div>':(myPred!=null?`<div class="saved-n">${t('saved')}${(myDraw&&myPred.penWinner)?' · pen: '+(myPred.penWinner==='H'?flag(m.home)+esc(m.home):flag(m.away)+esc(m.away)):''}</div>`:'')}`;}
   }
   const editForm=editing?`<div class="edit-form">
     <input type="text" id="ef-home" placeholder="Home" value="${esc(m.home)}"/>
@@ -981,6 +998,10 @@ function buildCard(m){
     </div>
     ${st&&S.isAdmin?`<button class="sm" data-a="save-res" data-m="${m.id}">${hasr?t('sv'):t('sv')}</button>`:''}
   </div>
+  ${hasr&&isKO(m)&&m.penWinner?`<div style="text-align:center;font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--gold);margin-top:4px;">
+    ${flag(m.penWinner==='H'?m.home:m.away)} ${esc(tTeam(m.penWinner==='H'?m.home:m.away))} ${S.lang==='DE'?'i.E.':'on pens'}
+    ${m.penHome!=null&&m.penAway!=null?`<span style="color:var(--muted);"> (${m.penHome}:${m.penAway})</span>`:''}
+  </div>`:''}
   ${st&&S.isAdmin&&ko?`<div class="pen-row" id="pen-res-${m.id}" style="display:${hasDraw?'flex':'none'}">
     <span class="pen-lbl">${t('penLbl')}</span>
     <button class="pen-btn${resH?' pri':' ghost'}" data-a="pen-res" data-m="${m.id}" data-v="H">${flag(m.home)} ${esc(tTeam(m.home))}</button>
@@ -991,6 +1012,7 @@ function buildCard(m){
     <input class="dg" type="number" min="0" max="30" id="psh-${m.id}" value="${m.penHome!=null?m.penHome:''}" style="width:2em;">
     <span class="vd">:</span>
     <input class="dg" type="number" min="0" max="30" id="psa-${m.id}" value="${m.penAway!=null?m.penAway:''}">
+    <button class="pri sm" data-a="save-pen" data-m="${m.id}" style="margin-left:6px;">${S.lang==='DE'?'Elfmeter speichern':'Save Penalties'}</button>
   </div>`:''}`;
   return`<div class="mc">
     <div class="mc-top"><span style="font-size:10px;font-family:monospace;color:var(--muted);">${m.matchNum?'M'+m.matchNum:''}</span><span class="pill ${cls}">${stxt}</span></div>
@@ -1030,20 +1052,50 @@ function buildRevealTable(m){
 
 /* ── Admin per-match picks manager ── */
 function buildAdminPicksList(m){
-  const preds=S.d.users.map(u=>({u,pred:S.d.predictions[pk(m.id,u.id)]})).filter(x=>x.pred!=null);
-  if(!preds.length)return`<div style="font-size:11px;color:var(--muted);font-family:monospace;margin:6px 0 2px;padding-top:6px;border-top:1px dashed var(--line-s);">No tips yet.</div>`;
-  return`<div style="margin-top:7px;padding-top:7px;border-top:1px dashed var(--line-s);">
-    <div style="font-family:'JetBrains Mono',monospace;font-size:9px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);margin-bottom:5px;">Tips (${preds.length}/${S.d.users.length})</div>
-    ${preds.map(({u,pred})=>{
-      const p=pts(pred,m);const hasr=m.actualHome!=null&&m.actualAway!=null;
-      const score=`${flag(m.home)}${pred.home}-${pred.away}${flag(m.away)}${isKO(m)&&pred.home===pred.away&&pred.penWinner?' (pen: '+(pred.penWinner==='H'?m.home:m.away)+')':''}`;
-      return`<div style="display:flex;align-items:center;justify-content:space-between;gap:6px;padding:2px 0;border-bottom:1px solid var(--line-s);">
-        <span style="font-size:12px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(u.name)}</span>
-        <span style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--gold);">${score}</span>
-        ${hasr?`<span style="font-family:'JetBrains Mono',monospace;font-size:11px;min-width:20px;text-align:right;${p>0?'color:var(--green)':''}">${p??'-'}</span>`:''}
-        <button style="background:none;border:none;cursor:pointer;color:var(--red);font-size:14px;line-height:1;padding:0 2px;flex-shrink:0;" data-a="del-pred" data-m="${m.id}" data-u="${u.id}" title="Delete ${esc(u.name)}'s tip">×</button>
-      </div>`;
-    }).join('')}
+  const allUsers=S.d.users;
+  const tipped=allUsers.map(u=>({u,pred:S.d.predictions[pk(m.id,u.id)]})).filter(x=>x.pred!=null);
+  const untipped=allUsers.filter(u=>!S.d.predictions[pk(m.id,u.id)]);
+  const hasr=m.actualHome!=null&&m.actualAway!=null;
+  const de=S.lang==='DE';
+
+  const tippedRows=tipped.map(({u,pred})=>{
+    const p=pts(pred,m);
+    const penNote=isKO(m)&&pred.home===pred.away&&pred.penWinner?' (pen: '+(pred.penWinner==='H'?tTeam(m.home):tTeam(m.away))+')':'';
+    const score=`${flag(m.home)}${pred.home}-${pred.away}${flag(m.away)}${penNote}`;
+    return`<div style="display:flex;align-items:center;gap:6px;padding:3px 0;border-bottom:1px solid var(--line-s);">
+      <span style="font-size:12px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(u.name)}</span>
+      <span style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--gold);">${score}</span>
+      ${hasr?`<span style="font-family:'JetBrains Mono',monospace;font-size:11px;min-width:22px;text-align:right;color:${p>0?'var(--green)':'var(--muted)'};">${p??'-'}</span>`:''}
+      <button style="background:none;border:none;cursor:pointer;color:var(--red);font-size:15px;line-height:1;padding:0 3px;" data-a="del-pred" data-m="${m.id}" data-u="${u.id}" title="${de?'Tipp löschen':'Delete tip'}">×</button>
+    </div>`;
+  }).join('');
+
+  /* Proxy tip form for each untipped user */
+  const ko=isKO(m);
+  const proxyRows=untipped.map(u=>{
+    const ppKey=m.id+'_'+u.id;
+    const pp=S.proxyPen[ppKey];
+    return`<div style="display:flex;align-items:center;gap:5px;padding:4px 0;border-bottom:1px dashed var(--line-s);flex-wrap:wrap;">
+      <span style="font-size:11px;color:var(--muted);min-width:55px;flex-shrink:0;">${esc(u.name)}</span>
+      <input class="dg proxy-h" type="number" min="0" max="30" id="prh-${m.id}-${u.id}" placeholder="H" style="width:2.3em;font-size:13px;">
+      <span style="font-family:'JetBrains Mono',monospace;color:var(--muted);">-</span>
+      <input class="dg proxy-a" type="number" min="0" max="30" id="pra-${m.id}-${u.id}" placeholder="A" style="width:2.3em;font-size:13px;">
+      ${ko?`<div id="proxy-pen-row-${m.id}-${u.id}" style="display:none;gap:4px;align-items:center;flex-wrap:wrap;">
+        <button class="pen-btn xs${pp==='H'?' pri':' ghost'}" style="font-size:10px;padding:2px 6px;" data-a="proxy-pen" data-m="${m.id}" data-u="${u.id}" data-v="H">${flag(m.home)}</button>
+        <button class="pen-btn xs${pp==='A'?' pri':' ghost'}" style="font-size:10px;padding:2px 6px;" data-a="proxy-pen" data-m="${m.id}" data-u="${u.id}" data-v="A">${flag(m.away)}</button>
+      </div>`:''}
+      <button class="pri xs" data-a="save-proxy" data-m="${m.id}" data-u="${u.id}" style="font-size:11px;padding:3px 8px;">${de?'Speichern':'Save'}</button>
+    </div>`;
+  }).join('');
+
+  const total=allUsers.length;
+  if(!tipped.length&&!untipped.length)return'';
+  return`<div style="margin-top:8px;padding-top:8px;border-top:1px dashed var(--line-s);">
+    <div style="font-family:'JetBrains Mono',monospace;font-size:9px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);margin-bottom:5px;">
+      ${de?'Tipps':'Tips'} (${tipped.length}/${total})
+    </div>
+    ${tippedRows}
+    ${untipped.length?`<div style="font-family:'JetBrains Mono',monospace;font-size:9px;color:var(--muted);margin:6px 0 3px;text-transform:uppercase;">${de?'Tipp eintragen für:':'Add tip for:'}</div>${proxyRows}`:''}
   </div>`;
 }
 
@@ -1109,8 +1161,9 @@ function buildBktM(m,isFinal=false){
   </div>`;
   const hCls=w==='H'?'won':w==='A'?'lost':'';
   const aCls=w==='A'?'won':w==='H'?'lost':'';
-  const hSc=hasr?`${m.actualHome}${penH&&m.penHome!=null?` (${m.penHome})`:''}`:null;
-  const aSc=hasr?`${m.actualAway}${penA&&m.penAway!=null?` (${m.penAway})`:''}`:null;
+  /* Show pen score for BOTH teams */
+  const hSc=hasr?`${m.actualHome}${isPens&&m.penHome!=null?` (${m.penHome})`:''}`:null;
+  const aSc=hasr?`${m.actualAway}${isPens&&m.penAway!=null?` (${m.penAway})`:''}`:null;
   return`<div class="bkt-m${isFinal?' bkt-final':''}">
     <div class="bkt-m-top">
       <span class="bkt-status${started(m)&&!hasr?' live':''}">${statusTxt||(hasr?'FT':fmtKO(m.kickoffISO))}</span>
@@ -1294,7 +1347,11 @@ function wireEvents(){
       const id=inp.id;
       if(id.startsWith('ph-')||id.startsWith('pa-')){
         const mid=id.slice(3);const h=q('ph-'+mid)?.value,a=q('pa-'+mid)?.value;
-        const pr=q('pen-row-'+mid);if(pr&&h!==''&&a!=='')pr.style.display=(parseInt(h,10)===parseInt(a,10))?'flex':'none';
+        const m=S.d.matches.find(x=>x.id===mid);
+        // Show pen row for upcoming KO matches OR for admin on any KO match
+        const pr=q('pen-row-'+mid);
+        if(pr&&h!==''&&a!==''&&m&&isKO(m)&&(!started(m)||S.isAdmin))
+          pr.style.display=(parseInt(h,10)===parseInt(a,10))?'flex':'none';
       }
       if(id.startsWith('rh-')||id.startsWith('ra-')){
         const mid=id.slice(3);const h=q('rh-'+mid)?.value,a=q('ra-'+mid)?.value;
@@ -1321,7 +1378,7 @@ function wireEvents(){
   document.querySelectorAll('[data-a="save-pick"]').forEach(btn=>{
     btn.addEventListener('click',async()=>{
       const mid=btn.dataset.m,m=S.d.matches.find(x=>x.id===mid);
-      if(!m||started(m)){await dbLoad();render();return;}
+      if(!m||(started(m)&&!S.isAdmin)){await dbLoad();render();return;}
       const h=q('ph-'+mid)?.value,a=q('pa-'+mid)?.value;
       if(h==null||h===''||a==null||a==='')return;
       const ph=parseInt(h,10),pa=parseInt(a,10);
@@ -1373,6 +1430,71 @@ function wireEvents(){
       if(!S.d.predictions[key]||!confirm('Delete this tip?'))return;
       delete S.d.predictions[key];
       try{await dbSave();}catch(e){alert('Save failed.');}
+      render();
+    });
+  });
+
+  /* Save penalties only (separate from score) */
+  document.querySelectorAll('[data-a="save-pen"]').forEach(btn=>{
+    btn.addEventListener('click',async()=>{
+      if(!S.isAdmin)return;
+      const mid=btn.dataset.m,m=S.d.matches.find(x=>x.id===mid);if(!m)return;
+      const pw=S.pendingPenRes[mid]||m.penWinner||null;
+      if(!pw){alert(S.lang==='DE'?'Bitte zuerst Elfmeter-Sieger wählen.':'Please select a pen winner first.');return;}
+      m.penWinner=pw;
+      const psh=q('psh-'+mid)?.value,psa=q('psa-'+mid)?.value;
+      m.penHome=psh!=null&&psh!==''?parseInt(psh,10):m.penHome;
+      m.penAway=psa!=null&&psa!==''?parseInt(psa,10):m.penAway;
+      try{await dbSave();btn.textContent=S.lang==='DE'?'Gespeichert ✓':'Saved ✓';setTimeout(()=>render(),800);}
+      catch(e){alert('Save failed: '+e.message);}
+    });
+  });
+
+  /* Proxy pen selection (admin tips for others) */
+  document.querySelectorAll('[data-a="proxy-pen"]').forEach(btn=>{
+    btn.addEventListener('click',()=>{
+      const key=btn.dataset.m+'_'+btn.dataset.u;
+      S.proxyPen[key]=btn.dataset.v;
+      // Toggle pri/ghost within this match-user's pen row
+      document.querySelectorAll(`[data-a="proxy-pen"][data-m="${btn.dataset.m}"][data-u="${btn.dataset.u}"]`).forEach(b=>{
+        b.classList.toggle('pri',b.dataset.v===btn.dataset.v);
+        b.classList.toggle('ghost',b.dataset.v!==btn.dataset.v);
+      });
+    });
+  });
+
+  /* Show proxy pen buttons when draw detected */
+  document.querySelectorAll('input.proxy-h,input.proxy-a').forEach(inp=>{
+    inp.addEventListener('input',()=>{
+      const parts=inp.id.replace('prh-','').replace('pra-','').split('-');
+      const mid=parts.slice(0,-1).join('-');const uid=parts[parts.length-1];
+      const h=q('prh-'+mid+'-'+uid)?.value;const a=q('pra-'+mid+'-'+uid)?.value;
+      const penRow=q('proxy-pen-row-'+mid+'-'+uid);
+      if(penRow&&h!==''&&a!==''){
+        penRow.style.display=parseInt(h,10)===parseInt(a,10)?'flex':'none';
+      }
+    });
+  });
+
+  /* Save proxy tip on behalf of another user */
+  document.querySelectorAll('[data-a="save-proxy"]').forEach(btn=>{
+    btn.addEventListener('click',async()=>{
+      if(!S.isAdmin)return;
+      const mid=btn.dataset.m,uid=btn.dataset.u;
+      const m=S.d.matches.find(x=>x.id===mid);if(!m)return;
+      const h=q('prh-'+mid+'-'+uid)?.value;const a=q('pra-'+mid+'-'+uid)?.value;
+      if(h==null||h===''||a==null||a===''){
+        alert(S.lang==='DE'?'Bitte Ergebnis eingeben.':'Please enter a score.');return;
+      }
+      const ph=parseInt(h,10),pa=parseInt(a,10);
+      const ppKey=mid+'_'+uid;
+      const penWinner=isKO(m)&&ph===pa?(S.proxyPen[ppKey]||null):null;
+      if(isKO(m)&&ph===pa&&!penWinner){
+        alert(S.lang==='DE'?'Bitte Elfmeter-Sieger wählen.':'Please select the pen winner.');return;
+      }
+      S.d.predictions[pk(mid,uid)]={home:ph,away:pa,penWinner,ts:Date.now(),byAdmin:true};
+      delete S.proxyPen[ppKey];
+      try{await dbSave();}catch(e){alert('Save failed: '+e.message);return;}
       render();
     });
   });
