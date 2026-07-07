@@ -156,6 +156,14 @@ td.sc{font-family:'JetBrains Mono',monospace;color:var(--gold);}td.pc{font-famil
 .grp-members{display:flex;flex-wrap:wrap;gap:5px;margin-bottom:6px;}
 .grp-mem-tag{font-family:'JetBrains Mono',monospace;font-size:10px;background:var(--bg-el);border:1px solid var(--line);border-radius:4px;padding:2px 6px;display:flex;align-items:center;gap:3px;}
 footer{text-align:center;font-size:11px;color:var(--muted);font-family:'JetBrains Mono',monospace;margin-top:6px;line-height:1.6;}
+.ls{background:linear-gradient(135deg,rgba(209,75,61,.08),rgba(232,179,61,.05));border:1px solid rgba(209,75,61,.3);border-radius:8px;padding:10px 12px;margin-top:8px;}
+.ls-clock{font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--red);font-weight:700;text-align:center;margin-bottom:8px;animation:pulse 1.4s infinite;}
+.ls-row{display:flex;align-items:center;justify-content:space-between;gap:6px;margin:3px 0;font-size:12px;}
+.ls-val{font-family:'JetBrains Mono',monospace;font-weight:700;font-size:13px;min-width:36px;text-align:center;}
+.ls-lbl{font-family:'JetBrains Mono',monospace;font-size:9px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);text-align:center;flex:1;}
+.ls-bar{height:4px;border-radius:2px;margin:2px 0 6px;display:flex;gap:1px;overflow:hidden;}
+.ls-bar-h{background:var(--gold);transition:width .5s;}
+.ls-bar-a{background:var(--chalk);opacity:.3;flex:1;}
 @media(max-width:500px){h1{font-size:20px;}.tn{font-size:12px;min-width:55px;}input.dg{width:2em;font-size:14px;}.modal{padding:13px;}.bkt-tree{min-width:860px;}.bkt-col{min-width:108px;}}
 </style>
 
@@ -176,7 +184,7 @@ const BRACKET_PAIRS=[
   /* Bracket A (Left) R32→R16 */
   [73,75,89],  /* M89: Canada vs Morocco      */
   [74,77,90],  /* M90: Paraguay vs France     */
-  [84,83,94],  /* M94: POR/CRO  vs Spain/AUT  */
+  [84,83,94],  /* M94: Spain/AUT vs POR/CRO   */
   [81,82,93],  /* M93: USA vs Belgium         */
   /* Bracket B (Right) R32→R16 */
   [76,78,91],  /* M91: Brazil vs Norway       */
@@ -307,7 +315,7 @@ const FIXTURES=[
 const EMPTY={matches:[],users:[],predictions:{},groups:[],settings:{exact:4,goaldiff:3,outcome:2,pen:1},adminPw:null,version:0};
 const S={
   d:{...EMPTY},me:null,isAdmin:false,adminOpen:false,editingId:null,
-  tab:'tipps',matchFilter:'upcoming',currentGroupId:null,resetPwUserId:null,proxyPen:{},standingsSort:'gesamt',
+  tab:'tipps',matchFilter:'upcoming',currentGroupId:null,resetPwUserId:null,proxyPen:{},standingsSort:'gesamt',liveStats:{},
   pendingPen:{},pendingPenRes:{},
   lang:'EN',  // DE or EN
   syncStatus:null,syncMsg:'',expandedReveal:{},localVersion:-1,lastLoaded:null,
@@ -543,12 +551,16 @@ function mergeFixtures(incoming){
     if(ex){
       if(im.matchNum!=null&&!ex.matchNum){ex.matchNum=im.matchNum;updated++;}
       if(im.penWinner&&!ex.penWinner){ex.penWinner=im.penWinner;ex.penHome=ti(im.penHome);ex.penAway=ti(im.penAway);updated++;}
-      /* Only update score when matched by TEAM NAME — kickoff-time matches must NOT
-         update score because home/away may be inverted in the external API,
-         which would corrupt a correctly-entered Spain 1-0 Portugal into 0-1 */
+      /* Update score for name-matched records WITH home/away order correction.
+         mk() sorts names so Portugal/Spain == Spain/Portugal in key space.
+         ESPN may return teams in opposite order → swap scores to match our perspective. */
       if(exByName&&im.actualHome!=null&&im.actualAway!=null){
         const nh=ti(im.actualHome),na=ti(im.actualAway);
-        if(ex.actualHome!==nh||ex.actualAway!==na){ex.actualHome=nh;ex.actualAway=na;updated++;}
+        const norm=s=>(s||'').toLowerCase().replace(/[^a-z]/g,'').slice(0,5);
+        const homeMatch=norm(im.home)===norm(exByName.home)||
+                        norm(im.home).slice(0,4)===norm(exByName.home).slice(0,4);
+        const [fh,fa]=homeMatch?[nh,na]:[na,nh];
+        if(exByName.actualHome!==fh||exByName.actualAway!==fa){exByName.actualHome=fh;exByName.actualAway=fa;updated++;}
       }
     }else{
 
@@ -1038,6 +1050,7 @@ function buildCard(m){
     ${editing?editForm:isTBD?`<div style="text-align:center;font-family:'Oswald',sans-serif;font-size:16px;text-transform:uppercase;color:var(--muted);margin:6px 0;">${esc(tTeam(m.home))} vs ${esc(tTeam(m.away))}</div>`:pick}
     <div class="ko">${fmtKO(m.kickoffISO)}</div>
     ${resultSection}${reveal}
+    ${st&&!hasr?buildLiveStats(m):''}
     ${S.isAdmin?buildAdminPicksList(m):''}
     <div class="mc-ft">
       <span style="display:flex;gap:5px;">
@@ -1237,7 +1250,11 @@ function wireEvents(){
   });
   /* Tabs & filters */
   document.querySelectorAll('[data-a="tab"]').forEach(btn=>{btn.addEventListener('click',()=>{S.tab=btn.dataset.v;render();});});
-  document.querySelectorAll('[data-a="filter"]').forEach(btn=>{btn.addEventListener('click',()=>{S.matchFilter=btn.dataset.v;render();});});
+  document.querySelectorAll('[data-a="filter"]').forEach(btn=>{btn.addEventListener('click',()=>{
+    S.matchFilter=btn.dataset.v;
+    if(S.matchFilter==='live'){startLivePolling();}else{stopLivePolling();}
+    render();
+  });});
   /* Group selector */
   q('sel-grp')?.addEventListener('change',e=>{S.currentGroupId=e.target.value||null;render();});
   /* Admin open/close */
@@ -1770,6 +1787,63 @@ async function autoSync(){
   }catch(e){console.warn('autoSync error:',e);}
 }
 
+/* ── Live match statistics ── */
+async function fetchLiveStats(){
+  try{
+    const data=await tfetch('https://site.api.espn.com/apis/site/v2/sports/soccer/fifa.world/scoreboard',8000);
+    const newStats={};
+    (data?.events||[]).forEach(ev=>{
+      const state=ev.status?.type?.state||'';
+      if(state!=='in')return;  // only in-progress matches
+      const ko=ev.date?.slice(0,16);if(!ko)return;
+      const comp=ev.competitions?.[0];if(!comp)return;
+      const clock=ev.status?.displayClock||'';
+      const period=ev.status?.period||1;
+      const st={clock,period,homeScore:null,awayScore:null};
+      // parse competitor stats
+      (comp.competitors||[]).forEach(c=>{
+        const side=c.homeAway;
+        if(c.score!=null)st[side+'Score']=c.score;
+        (c.statistics||[]).forEach(s=>{
+          if(!st[s.name])st[s.name]={};
+          st[s.name][side]=s.displayValue||String(s.value||'');
+        });
+      });
+      newStats[ko]=st;
+    });
+    if(Object.keys(newStats).length){S.liveStats=newStats;render();}
+  }catch(e){}
+}
+let _liveInterval=null;
+function startLivePolling(){if(!_liveInterval){fetchLiveStats();_liveInterval=setInterval(fetchLiveStats,45000);}}
+function stopLivePolling(){if(_liveInterval){clearInterval(_liveInterval);_liveInterval=null;}}
+
+function buildLiveStats(m){
+  const ko=m.kickoffISO?.slice(0,16);if(!ko)return'';
+  const d=S.liveStats[ko];if(!d)return'';
+  const de=S.lang==='DE';
+  const pctH=d.possessionPct?.home||d.possession?.home||'?';
+  const pctA=d.possessionPct?.away||d.possession?.away||'?';
+  const sotH=d.shotsOnTarget?.home||d.saves?.away||'?';
+  const sotA=d.shotsOnTarget?.away||d.saves?.home||'?';
+  const shH=d.shots?.home||d.totalShots?.home||'?';
+  const shA=d.shots?.away||d.totalShots?.away||'?';
+  const crH=d.cornerKicks?.home||d.corners?.home||'?';
+  const crA=d.cornerKicks?.away||d.corners?.away||'?';
+  const ycH=d.yellowCards?.home||'0';const ycA=d.yellowCards?.away||'0';
+  const pctHn=parseFloat(pctH)||50;const pctAn=100-pctHn;
+  const timeStr=d.period===2&&d.clock?`${d.clock} (${de?'2. HZ':'2H'})`:d.clock?`${d.clock} (${de?'1. HZ':'1H'})`:'';
+  return`<div class="ls">
+    ${timeStr?`<div class="ls-clock">🔴 LIVE ${timeStr}</div>`:''}
+    <div class="ls-bar"><div class="ls-bar-h" style="width:${pctHn}%"></div><div class="ls-bar-a"></div></div>
+    <div class="ls-row"><span class="ls-val" style="color:var(--gold);">${pctH}%</span><span class="ls-lbl">${de?'Ballbesitz':'Possession'}</span><span class="ls-val">${pctA}%</span></div>
+    <div class="ls-row"><span class="ls-val">${sotH}</span><span class="ls-lbl">${de?'Schüsse (aufs Tor)':'Shots on target'}</span><span class="ls-val">${sotA}</span></div>
+    <div class="ls-row"><span class="ls-val">${shH}</span><span class="ls-lbl">${de?'Schüsse gesamt':'Total shots'}</span><span class="ls-val">${shA}</span></div>
+    <div class="ls-row"><span class="ls-val">${crH}</span><span class="ls-lbl">${de?'Ecken':'Corners'}</span><span class="ls-val">${crA}</span></div>
+    <div class="ls-row"><span class="ls-val" style="color:${ycH>'0'?'#e8b43d':'inherit'};">${ycH}🟨</span><span class="ls-lbl">${de?'Gelbe Karten':'Yellow cards'}</span><span class="ls-val" style="color:${ycA>'0'?'#e8b43d':'inherit'};">${ycA}🟨</span></div>
+  </div>`;
+}
+
 async function init(){
   /* Restore theme + language */
   try{const th=localStorage.getItem('wm_theme');if(th)document.documentElement.setAttribute('data-theme',th);}catch(e){}
@@ -1797,7 +1871,11 @@ async function init(){
     setInterval(autoSync,10*60*1000);
   }
   render();
-  if(configured())setInterval(dbCheck,15000);
+  if(configured()){
+    setInterval(dbCheck,15000);
+    // Auto-start live stats polling if there are active live matches
+    if(S.d.matches.some(m=>started(m)&&m.actualHome==null)){startLivePolling();}
+  }
 }
 init();
 </script>
