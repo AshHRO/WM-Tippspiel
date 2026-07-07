@@ -176,7 +176,7 @@ const BRACKET_PAIRS=[
   /* Bracket A (Left) R32→R16 */
   [73,75,89],  /* M89: Canada vs Morocco      */
   [74,77,90],  /* M90: Paraguay vs France     */
-  [84,83,94],  /* M94: Spain/AUT vs POR/CRO   */
+  [84,83,94],  /* M94: POR/CRO  vs Spain/AUT  */
   [81,82,93],  /* M93: USA vs Belgium         */
   /* Bracket B (Right) R32→R16 */
   [76,78,91],  /* M91: Brazil vs Norway       */
@@ -282,10 +282,10 @@ const FIXTURES=[
   {stage:'Round of 32',matchNum:87,home:'Argentina',away:'Cape Verde',kickoffISO:'2026-07-03T22:00:00Z',actualHome:null,actualAway:null},
   {stage:'Round of 32',matchNum:88,home:'Colombia',away:'Ghana',kickoffISO:'2026-07-04T01:30:00Z',actualHome:null,actualAway:null},
   /* ── Round of 16 (M89–M96) ── */
-  {stage:'Round of 16',matchNum:89,home:'Canada',away:'Morocco',kickoffISO:'2026-07-04T17:00:00Z',actualHome:null,actualAway:null},
-  {stage:'Round of 16',matchNum:90,home:'Paraguay',away:'France',kickoffISO:'2026-07-04T21:00:00Z',actualHome:null,actualAway:null},
-  {stage:'Round of 16',matchNum:91,home:'Brazil',away:'Norway',kickoffISO:'2026-07-05T20:00:00Z',actualHome:null,actualAway:null},
-  {stage:'Round of 16',matchNum:92,home:'Mexico',away:'England',kickoffISO:'2026-07-06T01:00:00Z',actualHome:null,actualAway:null},
+  {stage:'Round of 16',matchNum:89,home:'Canada',away:'Morocco',kickoffISO:'2026-07-04T17:00:00Z',actualHome:null,actualAway:null},  /* W73 vs W75 */
+  {stage:'Round of 16',matchNum:90,home:'Paraguay',away:'France',kickoffISO:'2026-07-04T21:00:00Z',actualHome:null,actualAway:null},   /* W74 vs W77 */
+  {stage:'Round of 16',matchNum:91,home:'Brazil',away:'Norway',kickoffISO:'2026-07-05T20:00:00Z',actualHome:null,actualAway:null},      /* W76 vs W78 */
+  {stage:'Round of 16',matchNum:92,home:'Mexico',away:'England',kickoffISO:'2026-07-06T01:00:00Z',actualHome:null,actualAway:null},     /* W79 vs W80 */
   {stage:'Round of 16',matchNum:93,home:'TBD',away:'TBD',kickoffISO:'2026-07-05T17:00:00Z',actualHome:null,actualAway:null},  /* USA/BIH vs BEL/SEN */
   {stage:'Round of 16',matchNum:94,home:'TBD',away:'TBD',kickoffISO:'2026-07-06T21:00:00Z',actualHome:null,actualAway:null},  /* ESP/AUT vs POR/CRO */
   {stage:'Round of 16',matchNum:95,home:'TBD',away:'TBD',kickoffISO:'2026-07-07T17:00:00Z',actualHome:null,actualAway:null},  /* ARG/CPV vs AUS/EGY */
@@ -326,7 +326,7 @@ async function dbLoad(){
     if(!S.d.settings.goaldiff)S.d.settings.goaldiff=3;
     if(!S.d.groups)S.d.groups=[];
     S.d.groups.forEach(g=>{if(!Array.isArray(g.members))g.members=[];});  // Firebase drops []
-    // Backfill matchNums: match by team names OR exact kickoff time
+    // Backfill matchNums using team names + kickoff time
     {const _fByKey={};const _fByKO={};
     FIXTURES.forEach(f=>{if(f.matchNum){_fByKey[mk(f)]=f;if(f.kickoffISO)_fByKO[f.kickoffISO.slice(0,16)]=f;}});
     S.d.matches.forEach(m=>{
@@ -335,43 +335,50 @@ async function dbLoad(){
       if(ref.stage&&KNOCKOUT_STAGES.includes(ref.stage))m.stage=ref.stage;
       if(ref.penWinner&&!m.penWinner){m.penWinner=ref.penWinner;if(ref.penHome!=null)m.penHome=ref.penHome;if(ref.penAway!=null)m.penAway=ref.penAway;}
     });}
-    // Ensure every KO stub (M89-M104) exists — advanceBracket needs them to write into
+    // Build kickoff-time index of existing matches
+    const _mByKO={};S.d.matches.forEach(m=>{if(m.kickoffISO&&!_mByKO[m.kickoffISO.slice(0,16)])_mByKO[m.kickoffISO.slice(0,16)]=m;});
+    // Ensure all KO stubs exist — INJECT matchNum into existing match if possible (avoids duplicates)
     {const _knByNum={};S.d.matches.forEach(m=>{if(m.matchNum)_knByNum[m.matchNum]=m;});
     FIXTURES.filter(f=>f.matchNum&&KNOCKOUT_STAGES.includes(f.stage)).forEach(f=>{
       if(!_knByNum[f.matchNum]){
-        S.d.matches.push({id:uid(),stage:f.stage,matchNum:f.matchNum,
-          home:f.home||'TBD',away:f.away||'TBD',kickoffISO:f.kickoffISO,
-          actualHome:f.actualHome??null,actualAway:f.actualAway??null,
-          penWinner:f.penWinner||null,penHome:f.penHome??null,penAway:f.penAway??null});
-        _stubsAdded++;
+        const exist=f.kickoffISO?_mByKO[f.kickoffISO.slice(0,16)]:null;
+        if(exist&&!exist.matchNum){
+          exist.matchNum=f.matchNum;
+          if(!KNOCKOUT_STAGES.includes(exist.stage||''))exist.stage=f.stage;
+          if(f.penWinner&&!exist.penWinner){exist.penWinner=f.penWinner;exist.penHome=f.penHome??null;exist.penAway=f.penAway??null;}
+          _stubsAdded++;
+        }else if(!exist){
+          S.d.matches.push({id:uid(),stage:f.stage,matchNum:f.matchNum,
+            home:f.home||'TBD',away:f.away||'TBD',kickoffISO:f.kickoffISO,
+            actualHome:f.actualHome??null,actualAway:f.actualAway??null,
+            penWinner:f.penWinner||null,penHome:f.penHome??null,penAway:f.penAway??null});
+          _stubsAdded++;
+        }
       }
     });}
-    // Deduplicate: same kickoff → keep match with most data, merge others into it
-    {const _koMap={};S.d.matches.forEach(m=>{if(!m.kickoffISO)return;const k=m.kickoffISO.slice(0,16);(_koMap[k]||(_koMap[k]=[])).push(m);});
-    const _keep=new Set();const _remap={};
-    Object.values(_koMap).forEach(grp=>{
-      if(grp.length<2){grp.forEach(m=>_keep.add(m.id));return;}
-      const scored=grp.map(m=>({m,s:(m.matchNum?10:0)+(m.actualHome!=null?5:0)+(m.home&&m.home!=='TBD'?3:0)+(m.away&&m.away!=='TBD'?3:0)+(m.penWinner?2:0)})).sort((a,b)=>b.s-a.s);
-      const win=scored[0].m;_keep.add(win.id);
-      scored.slice(1).forEach(({m:oth})=>{
-        if(!win.matchNum&&oth.matchNum)win.matchNum=oth.matchNum;
-        if(win.home==='TBD'&&oth.home&&oth.home!=='TBD')win.home=oth.home;
-        if(win.away==='TBD'&&oth.away&&oth.away!=='TBD')win.away=oth.away;
-        if(win.actualHome==null&&oth.actualHome!=null){win.actualHome=oth.actualHome;win.actualAway=oth.actualAway;}
-        if(!win.penWinner&&oth.penWinner){win.penWinner=oth.penWinner;win.penHome=oth.penHome;win.penAway=oth.penAway;}
-        if(!win.stage&&oth.stage)win.stage=oth.stage;
-        _remap[oth.id]=win.id;
-      });
+    // Merge duplicates: combine matchNum+result+teams from different copies, keep best single record
+    {const groups={};
+    S.d.matches.forEach(m=>{const k=m.kickoffISO?m.kickoffISO.slice(0,16):m.id;(groups[k]||(groups[k]=[])).push(m);});
+    const merged=[];
+    Object.values(groups).forEach(grp=>{
+      if(grp.length===1){merged.push(grp[0]);return;}
+      // Merge all copies: take matchNum from whoever has it, take result from whoever has it
+      const best=grp.reduce((a,b)=>({
+        ...a,
+        matchNum:a.matchNum||b.matchNum,
+        stage:(KNOCKOUT_STAGES.includes(a.stage||'')?a.stage:b.stage)||a.stage,
+        home:(a.home&&a.home!=='TBD')?a.home:b.home,
+        away:(a.away&&a.away!=='TBD')?a.away:b.away,
+        actualHome:a.actualHome??b.actualHome,
+        actualAway:a.actualAway??b.actualAway,
+        penWinner:a.penWinner||b.penWinner,
+        penHome:a.penHome??b.penHome,
+        penAway:a.penAway??b.penAway,
+      }));
+      merged.push(best);
+      if(grp.length>1)_stubsAdded++;  // trigger save of merged record
     });
-    if(Object.keys(_remap).length>0){
-      S.d.matches=S.d.matches.filter(m=>_keep.has(m.id));
-      Object.keys(_remap).forEach(oldId=>{
-        Object.keys(S.d.predictions).forEach(k=>{
-          if(k.startsWith(oldId+'__')){const nk=_remap[oldId]+'__'+k.slice(oldId.length+2);if(!S.d.predictions[nk])S.d.predictions[nk]=S.d.predictions[k];delete S.d.predictions[k];}
-        });
-      });
-      _stubsAdded+=Object.keys(_remap).length;
-    }}
+    S.d.matches=merged;}
     S.localVersion=data.version??0;
   }
   S.lastLoaded=new Date();
@@ -521,7 +528,6 @@ function visibleUsers(){
 
 /* ── Data ── */
 function mergeFixtures(incoming){
-  // Build two lookup indexes: by sorted team names AND by exact kickoff time
   const byKey={};const byKO={};
   S.d.matches.forEach(m=>{
     byKey[mk(m)]=m;
@@ -531,16 +537,21 @@ function mergeFixtures(incoming){
   (incoming||[]).forEach(im=>{
     if(!im.home||!im.away||!im.kickoffISO)return;
     const k=mk(im);const ti=v=>v==null?null:(isNaN(parseInt(v,10))?null:parseInt(v,10));
-    // Match by team names first; fall back to exact kickoff time (handles API name mismatches)
-    const ex=byKey[k]||(im.kickoffISO?byKO[im.kickoffISO.slice(0,16)]:null);
+    const exByName=byKey[k];
+    const exByKO=exByName?null:byKO[im.kickoffISO.slice(0,16)];
+    const ex=exByName||exByKO;
     if(ex){
       if(im.matchNum!=null&&!ex.matchNum){ex.matchNum=im.matchNum;updated++;}
-      // Update TBD team names when real names come from sync
-      if(im.home&&im.home!=='TBD'&&(!ex.home||ex.home==='TBD')){ex.home=im.home;updated++;}
-      if(im.away&&im.away!=='TBD'&&(!ex.away||ex.away==='TBD')){ex.away=im.away;updated++;}
       if(im.penWinner&&!ex.penWinner){ex.penWinner=im.penWinner;ex.penHome=ti(im.penHome);ex.penAway=ti(im.penAway);updated++;}
-      if(im.actualHome!=null&&im.actualAway!=null){const nh=ti(im.actualHome),na=ti(im.actualAway);if(ex.actualHome!==nh||ex.actualAway!==na){ex.actualHome=nh;ex.actualAway=na;updated++;}}
+      /* Only update score when matched by TEAM NAME — kickoff-time matches must NOT
+         update score because home/away may be inverted in the external API,
+         which would corrupt a correctly-entered Spain 1-0 Portugal into 0-1 */
+      if(exByName&&im.actualHome!=null&&im.actualAway!=null){
+        const nh=ti(im.actualHome),na=ti(im.actualAway);
+        if(ex.actualHome!==nh||ex.actualAway!==na){ex.actualHome=nh;ex.actualAway=na;updated++;}
+      }
     }else{
+
       S.d.matches.push({id:uid(),stage:im.stage||'',matchNum:im.matchNum||null,home:im.home,away:im.away,kickoffISO:im.kickoffISO,actualHome:ti(im.actualHome),actualAway:ti(im.actualAway),penWinner:im.penWinner||null,penHome:ti(im.penHome),penAway:ti(im.penAway)});
       added++;
     }
@@ -560,11 +571,9 @@ function advanceBracket(){
       return want==='H'?m.home:m.away;
     };
     const hTeam=getTeam(srcH,srcH<0),aTeam=getTeam(srcA,srcA<0);
-    // Update any slot that is TBD/empty OR that doesn't yet match the real winner
-    const isTBD_h=!dstMatch.home||dstMatch.home==='TBD';
-    const isTBD_a=!dstMatch.away||dstMatch.away==='TBD';
-    if(hTeam&&(isTBD_h||dstMatch.home!==hTeam)&&isTBD_h){dstMatch.home=hTeam;changed=true;}
-    if(aTeam&&(isTBD_a||dstMatch.away!==aTeam)&&isTBD_a){dstMatch.away=aTeam;changed=true;}
+    // Always propagate the actual winner – fixes cases where result was corrected
+    if(hTeam&&dstMatch.home!==hTeam){dstMatch.home=hTeam;changed=true;}
+    if(aTeam&&dstMatch.away!==aTeam){dstMatch.away=aTeam;changed=true;}
   });
   return changed;
 }
@@ -735,6 +744,7 @@ function buildAdminPanel(){
         <button class="pri sm" id="btn-sync" ${S.syncStatus==='working'?'disabled':''}>
           ${S.syncStatus==='working'?t('syncing'):t('syncWeb')}</button>
         <button class="sm" id="btn-builtin">${t('loadFix')}</button>
+        <button class="sm" id="btn-force-bracket">🔧 ${S.lang==='DE'?'Spielbaum reparieren':'Fix Bracket'}</button>
       </div>
       <div><span class="smsg ${sc}">${esc(sm)}</span></div>
     </div>
@@ -949,7 +959,7 @@ function buildMatches(sorted){
 function buildCard(m){
   const st=started(m),hasr=m.actualHome!=null&&m.actualAway!=null;
   const cls=hasr?'p-ft':st?'p-lv':'p-up',stxt=hasr?t('ft'):st?t('live'):t('up');
-  const isTBD=m.home==='TBD'&&m.away==='TBD';
+  const isTBD=(!m.home||m.home==='TBD')&&(!m.away||m.away==='TBD');
   const myPred=S.me?S.d.predictions[pk(m.id,S.me.id)]:null;
   const visUsers=visibleUsers();
   const subCnt=visUsers.filter(u=>S.d.predictions[pk(m.id,u.id)]).length;
@@ -984,6 +994,7 @@ function buildCard(m){
       ${locked?'<div class="lock-n">'+t('lock')+'</div>':(myPred!=null?`<div class="saved-n">${t('saved')}${(myDraw&&myPred.penWinner)?' · pen: '+(myPred.penWinner==='H'?flag(m.home)+esc(m.home):flag(m.away)+esc(m.away)):''}</div>`:'')}`;}
   }
   const editForm=editing?`<div class="edit-form">
+    <input type="number" id="ef-mn" placeholder="Match #" value="${m.matchNum||''}" style="max-width:4.5em;" title="Match number (e.g. 98)"/>
     <input type="text" id="ef-home" placeholder="Home" value="${esc(m.home)}"/>
     <input type="text" id="ef-away" placeholder="Away" value="${esc(m.away)}"/>
     <input type="text" id="ef-stg" placeholder="Stage" value="${esc(m.stage)}" style="max-width:120px;"/>
@@ -1024,12 +1035,15 @@ function buildCard(m){
   </div>`:''}`;
   return`<div class="mc">
     <div class="mc-top"><span style="font-size:10px;font-family:monospace;color:var(--muted);">${m.matchNum?'M'+m.matchNum:''}</span><span class="pill ${cls}">${stxt}</span></div>
-    ${isTBD&&!editing?`<div style="text-align:center;font-family:'Oswald',sans-serif;font-size:16px;text-transform:uppercase;color:var(--muted);margin:6px 0;">TBD vs TBD</div>`:editing?editForm:pick}
+    ${editing?editForm:isTBD?`<div style="text-align:center;font-family:'Oswald',sans-serif;font-size:16px;text-transform:uppercase;color:var(--muted);margin:6px 0;">${esc(tTeam(m.home))} vs ${esc(tTeam(m.away))}</div>`:pick}
     <div class="ko">${fmtKO(m.kickoffISO)}</div>
     ${resultSection}${reveal}
     ${S.isAdmin?buildAdminPicksList(m):''}
     <div class="mc-ft">
-      <span>${S.isAdmin?`<button class="xs" data-a="edit-m" data-m="${m.id}">${editing?'Cancel':'Edit'}</button>`:''}</span>
+      <span style="display:flex;gap:5px;">
+        ${S.isAdmin?`<button class="xs" data-a="edit-m" data-m="${m.id}">${editing?'Cancel':'Edit'}</button>`:''}
+        ${S.isAdmin?`<button class="xs" data-a="flip-m" data-m="${m.id}" title="Flip home ⇄ away teams and all tips">&#x21C4; Flip</button>`:''}
+      </span>
       <span style="display:flex;gap:5px;">
         ${S.isAdmin?`<button class="red xs" data-a="del-m" data-m="${m.id}">Delete</button>`:''}
       </span>
@@ -1155,7 +1169,7 @@ function buildBracket(){
 
 function buildBktM(m,isFinal=false){
   const hasr=m.actualHome!=null&&m.actualAway!=null;
-  const isTBD=m.home==='TBD'&&m.away==='TBD';
+  const isTBD=(!m.home||m.home==='TBD')&&(!m.away||m.away==='TBD');
   const w=matchWinner(m);
   const isDraw=hasr&&m.actualHome===m.actualAway&&isKO(m);
   const penH=isDraw&&m.penWinner==='H',penA=isDraw&&m.penWinner==='A';
@@ -1242,6 +1256,34 @@ function wireEvents(){
   });
   /* Sync / fixtures */
   q('btn-sync')?.addEventListener('click',syncFromWeb);
+  q('btn-force-bracket')?.addEventListener('click',async()=>{
+    const btn=q('btn-force-bracket');if(btn){btn.disabled=true;btn.textContent='...';}
+    try{
+      await dbLoad();  // refresh + auto-backfill + auto-stub + auto-advance
+      // Explicitly ensure every KO stub exists (in case some were deleted)
+      {const byNum={};S.d.matches.forEach(m=>{if(m.matchNum)byNum[m.matchNum]=m;});
+      const byKO={};S.d.matches.forEach(m=>{if(m.kickoffISO)byKO[m.kickoffISO.slice(0,16)]=m;});
+      let created=0;
+      FIXTURES.filter(f=>f.matchNum&&KNOCKOUT_STAGES.includes(f.stage)).forEach(f=>{
+        if(!byNum[f.matchNum]){
+          const exist=f.kickoffISO?byKO[f.kickoffISO.slice(0,16)]:null;
+          if(exist&&!exist.matchNum){exist.matchNum=f.matchNum;if(f.stage)exist.stage=f.stage;created++;}
+          else if(!exist){
+            const nm={id:uid(),stage:f.stage,matchNum:f.matchNum,home:f.home||'TBD',away:f.away||'TBD',
+              kickoffISO:f.kickoffISO,actualHome:f.actualHome??null,actualAway:f.actualAway??null,
+              penWinner:f.penWinner||null,penHome:f.penHome??null,penAway:f.penAway??null};
+            S.d.matches.push(nm);byNum[f.matchNum]=nm;created++;
+          }
+        }
+      });
+      if(created)console.log('Created '+created+' missing KO stubs');}
+      // Force-advance bracket
+      advanceBracket();advanceBracket();  // run twice to propagate multi-level changes
+      await dbSave();
+      render();
+      if(btn){btn.textContent=S.lang==='DE'?'✓ Fertig':'✓ Done';btn.disabled=false;}
+    }catch(e){if(btn){btn.disabled=false;btn.textContent='⚠ Error';}alert('Error: '+e.message);}
+  });
   q('btn-builtin')?.addEventListener('click',loadBuiltIn);
   /* Scoring */
   q('btn-sc')?.addEventListener('click',async()=>{
@@ -1407,7 +1449,10 @@ function wireEvents(){
       m.penHome=(isKO(m)&&rh===ra&&psh!=null&&psh!=='')?parseInt(psh,10):null;
       m.penAway=(isKO(m)&&rh===ra&&psa!=null&&psa!=='')?parseInt(psa,10):null;
       advanceBracket();
-      try{await dbSave();}catch(e){alert('Could not save: '+e.message);}render();
+      try{await dbSave();}catch(e){alert('Could not save: '+e.message);render();return;}
+      // Run advance again to ensure bracket is propagated after save
+      if(advanceBracket())try{await dbSave();}catch(e){}
+      render();
     });
   });
   /* Standings sort */
@@ -1523,14 +1568,52 @@ function wireEvents(){
     });
   });
 
+  /* Flip home ↔ away (fixes inverted ESPN imports) */
+  document.querySelectorAll('[data-a="flip-m"]').forEach(btn=>{
+    btn.addEventListener('click',async()=>{
+      if(!S.isAdmin)return;
+      const mid=btn.dataset.m,m=S.d.matches.find(x=>x.id===mid);if(!m)return;
+      const de=S.lang==='DE';
+      if(!confirm(de?`Heim und Auswärts für ${m.home} vs ${m.away} tauschen? Alle Tipps werden ebenfalls getauscht.`
+                    :`Flip home ⇄ away for ${m.home} vs ${m.away}? All tips will be flipped too.`))return;
+
+      // Swap match teams
+      [m.home,m.away]=[m.away,m.home];
+      // Swap actual result
+      [m.actualHome,m.actualAway]=[m.actualAway,m.actualHome];
+      // Swap pen data
+      [m.penHome,m.penAway]=[m.penAway,m.penHome];
+      if(m.penWinner)m.penWinner=m.penWinner==='H'?'A':'H';
+
+      // Flip ALL predictions for this match
+      let flippedPreds=0;
+      Object.keys(S.d.predictions).forEach(k=>{
+        if(!k.startsWith(mid+'__'))return;
+        const pred=S.d.predictions[k];
+        [pred.home,pred.away]=[pred.away,pred.home];
+        if(pred.penWinner)pred.penWinner=pred.penWinner==='H'?'A':'H';
+        flippedPreds++;
+      });
+
+      // Re-run bracket with new home/away assignments
+      advanceBracket();
+      try{await dbSave();}
+      catch(e){alert('Save failed: '+e.message);return;}
+      render();
+      console.log(`Flipped ${m.home} vs ${m.away} — ${flippedPreds} predictions updated`);
+    });
+  });
+
   /* Match edit/delete/reveal */
   document.querySelectorAll('[data-a="toggle-rv"]').forEach(btn=>{btn.addEventListener('click',()=>{const mid=btn.dataset.m;S.expandedReveal[mid]=!S.expandedReveal[mid];render();});});
   document.querySelectorAll('[data-a="edit-m"]').forEach(btn=>{btn.addEventListener('click',()=>{const mid=btn.dataset.m;S.editingId=S.editingId===mid?null:mid;render();});});
   document.querySelectorAll('[data-a="save-edit"]').forEach(btn=>{
     btn.addEventListener('click',async()=>{
       if(!S.isAdmin)return;const mid=btn.dataset.m,m=S.d.matches.find(x=>x.id===mid);if(!m)return;
-      const home=q('ef-home')?.value.trim(),away=q('ef-away')?.value.trim(),stage=q('ef-stg')?.value.trim(),ko=q('ef-ko')?.value;
+      const mn=q('ef-mn')?.value,home=q('ef-home')?.value.trim(),away=q('ef-away')?.value.trim(),stage=q('ef-stg')?.value.trim(),ko=q('ef-ko')?.value;
+      if(mn!==''&&mn!=null){const n=parseInt(mn,10);if(!isNaN(n))m.matchNum=n;}
       if(home)m.home=home;if(away)m.away=away;if(stage)m.stage=stage;if(ko)m.kickoffISO=new Date(ko).toISOString();
+      advanceBracket();  // re-run after matchNum change
       S.editingId=null;try{await dbSave();}catch(e){alert('Save failed.');}render();
     });
   });
