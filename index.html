@@ -560,7 +560,10 @@ function mergeFixtures(incoming){
         const homeMatch=norm(im.home)===norm(exByName.home)||
                         norm(im.home).slice(0,4)===norm(exByName.home).slice(0,4);
         const [fh,fa]=homeMatch?[nh,na]:[na,nh];
-        if(exByName.actualHome!==fh||exByName.actualAway!==fa){exByName.actualHome=fh;exByName.actualAway=fa;updated++;}
+        // Never overwrite a result the admin manually entered (manualResult flag)
+        if(!exByName.manualResult&&(exByName.actualHome!==fh||exByName.actualAway!==fa)){
+          exByName.actualHome=fh;exByName.actualAway=fa;updated++;
+        }
       }
     }else{
 
@@ -970,7 +973,7 @@ function buildMatches(sorted){
 
 function buildCard(m){
   const st=started(m),hasr=m.actualHome!=null&&m.actualAway!=null;
-  const cls=hasr?'p-ft':st?'p-lv':'p-up',stxt=hasr?t('ft'):st?t('live'):t('up');
+  const cls=hasr?'p-ft':st?'p-lv':'p-up',stxt=hasr?(m.manualResult?t('ft')+' 🔒':t('ft')):st?t('live'):t('up');
   const isTBD=(!m.home||m.home==='TBD')&&(!m.away||m.away==='TBD');
   const myPred=S.me?S.d.predictions[pk(m.id,S.me.id)]:null;
   const visUsers=visibleUsers();
@@ -1465,6 +1468,7 @@ function wireEvents(){
       const psh=q('psh-'+mid)?.value,psa=q('psa-'+mid)?.value;
       m.penHome=(isKO(m)&&rh===ra&&psh!=null&&psh!=='')?parseInt(psh,10):null;
       m.penAway=(isKO(m)&&rh===ra&&psa!=null&&psa!=='')?parseInt(psa,10):null;
+      m.manualResult=true;  // lock: auto-sync will never overwrite a manually-entered result
       advanceBracket();
       try{await dbSave();}catch(e){alert('Could not save: '+e.message);render();return;}
       // Run advance again to ensure bracket is propagated after save
@@ -1571,6 +1575,16 @@ function wireEvents(){
       delete S.proxyPen[ppKey];
       try{await dbSave();}catch(e){alert('Save failed: '+e.message);return;}
       render();
+    });
+  });
+
+  /* Unlock manual result (allow auto-sync to update again) */
+  document.querySelectorAll('[data-a="unlock-res"]').forEach(btn=>{
+    btn.addEventListener('click',async()=>{
+      if(!S.isAdmin)return;
+      const m=S.d.matches.find(x=>x.id===btn.dataset.m);if(!m)return;
+      delete m.manualResult;
+      try{await dbSave();}catch(e){}render();
     });
   });
 
@@ -1833,14 +1847,21 @@ function buildLiveStats(m){
   const ycH=d.yellowCards?.home||'0';const ycA=d.yellowCards?.away||'0';
   const pctHn=parseFloat(pctH)||50;const pctAn=100-pctHn;
   const timeStr=d.period===2&&d.clock?`${d.clock} (${de?'2. HZ':'2H'})`:d.clock?`${d.clock} (${de?'1. HZ':'1H'})`:'';
+  const sH=d.homeScore??'?';const sA=d.awayScore??'?';
+  const scoreH=d.homeScore!=null?String(d.homeScore):'?',scoreA=d.awayScore!=null?String(d.awayScore):'?';
   return`<div class="ls">
     ${timeStr?`<div class="ls-clock">🔴 LIVE ${timeStr}</div>`:''}
+    <div style="display:flex;align-items:center;justify-content:center;gap:10px;margin:4px 0 10px;">
+      <div style="text-align:right;flex:1;font-size:11px;color:var(--muted);font-family:'JetBrains Mono',monospace;">${flag(m.home)} ${esc(tTeam(m.home))}</div>
+      <div style="font-family:'Oswald',sans-serif;font-weight:700;font-size:32px;color:var(--gold);letter-spacing:6px;min-width:90px;text-align:center;">${scoreH}–${scoreA}</div>
+      <div style="text-align:left;flex:1;font-size:11px;color:var(--muted);font-family:'JetBrains Mono',monospace;">${flag(m.away)} ${esc(tTeam(m.away))}</div>
+    </div>
     <div class="ls-bar"><div class="ls-bar-h" style="width:${pctHn}%"></div><div class="ls-bar-a"></div></div>
     <div class="ls-row"><span class="ls-val" style="color:var(--gold);">${pctH}%</span><span class="ls-lbl">${de?'Ballbesitz':'Possession'}</span><span class="ls-val">${pctA}%</span></div>
-    <div class="ls-row"><span class="ls-val">${sotH}</span><span class="ls-lbl">${de?'Schüsse (aufs Tor)':'Shots on target'}</span><span class="ls-val">${sotA}</span></div>
+    <div class="ls-row"><span class="ls-val">${sotH}</span><span class="ls-lbl">${de?'Schüsse (Tor)':'Shots on target'}</span><span class="ls-val">${sotA}</span></div>
     <div class="ls-row"><span class="ls-val">${shH}</span><span class="ls-lbl">${de?'Schüsse gesamt':'Total shots'}</span><span class="ls-val">${shA}</span></div>
     <div class="ls-row"><span class="ls-val">${crH}</span><span class="ls-lbl">${de?'Ecken':'Corners'}</span><span class="ls-val">${crA}</span></div>
-    <div class="ls-row"><span class="ls-val" style="color:${ycH>'0'?'#e8b43d':'inherit'};">${ycH}🟨</span><span class="ls-lbl">${de?'Gelbe Karten':'Yellow cards'}</span><span class="ls-val" style="color:${ycA>'0'?'#e8b43d':'inherit'};">${ycA}🟨</span></div>
+    <div class="ls-row"><span class="ls-val" style="color:${parseInt(ycH)>0?'#e8b43d':'inherit'};">${ycH}🟨</span><span class="ls-lbl">${de?'Gelb':'Yellow'}</span><span class="ls-val" style="color:${parseInt(ycA)>0?'#e8b43d':'inherit'};">${ycA}🟨</span></div>
   </div>`;
 }
 
